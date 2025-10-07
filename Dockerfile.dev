@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
   libreoffice \
   poppler-utils \
   qpdf \
+  git \
 # settings.yml | tessdataDir: /usr/share/tesseract-ocr/5/tessdata
   tesseract-ocr \
   tesseract-ocr-eng \
