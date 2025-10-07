@@ -118,90 +118,90 @@ jobs:
           provenance: true
           sbom: true
 
-      - name: Sign regular images
-        if: github.ref == 'refs/heads/master'
-        env:
-          DIGEST: ${{ steps.build-push-regular.outputs.digest }}
-          TAGS: ${{ steps.meta.outputs.tags }}
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: |
-          echo "$TAGS" | tr ',' '\n' | while read -r tag; do
-            cosign sign --yes \
-              --key env://COSIGN_PRIVATE_KEY \
-              "${tag}@${DIGEST}"
-          done
+      # - name: Sign regular images
+      #   if: github.ref == 'refs/heads/master'
+      #   env:
+      #     DIGEST: ${{ steps.build-push-regular.outputs.digest }}
+      #     TAGS: ${{ steps.meta.outputs.tags }}
+      #     COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      #     COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      #   run: |
+      #     echo "$TAGS" | tr ',' '\n' | while read -r tag; do
+      #       cosign sign --yes \
+      #         --key env://COSIGN_PRIVATE_KEY \
+      #         "${tag}@${DIGEST}"
+      #     done
 
-      - name: Generate tags ultra-lite
-        id: meta2
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
-        if: github.ref != 'refs/heads/main'
-        with:
-          images: |
-            # ${{ secrets.DOCKER_HUB_USERNAME }}/s-pdf
-            ghcr.io/${{ steps.repoowner.outputs.lowercase }}/s-pdf
-            ghcr.io/${{ steps.repoowner.outputs.lowercase }}/stirling-pdf
-            # ${{ secrets.DOCKER_HUB_ORG_USERNAME }}/stirling-pdf
-          tags: |
-            type=raw,value=${{ steps.versionNumber.outputs.versionNumber }}-ultra-lite,enable=${{ github.ref == 'refs/heads/master' }}
-            type=raw,value=latest-ultra-lite,enable=${{ github.ref == 'refs/heads/master' }}
+      # - name: Generate tags ultra-lite
+      #   id: meta2
+      #   uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+      #   if: github.ref != 'refs/heads/main'
+      #   with:
+      #     images: |
+      #       # ${{ secrets.DOCKER_HUB_USERNAME }}/s-pdf
+      #       ghcr.io/${{ steps.repoowner.outputs.lowercase }}/s-pdf
+      #       ghcr.io/${{ steps.repoowner.outputs.lowercase }}/stirling-pdf
+      #       # ${{ secrets.DOCKER_HUB_ORG_USERNAME }}/stirling-pdf
+      #     tags: |
+      #       type=raw,value=${{ steps.versionNumber.outputs.versionNumber }}-ultra-lite,enable=${{ github.ref == 'refs/heads/master' }}
+      #       type=raw,value=latest-ultra-lite,enable=${{ github.ref == 'refs/heads/master' }}
 
-      - name: Build and push Dockerfile-ultra-lite
-        id: build-push-lite
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        if: github.ref != 'refs/heads/main'
-        with:
-          context: .
-          file: ./Dockerfile.ultra-lite
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: ${{ steps.meta2.outputs.tags }}
-          labels: ${{ steps.meta2.outputs.labels }}
-          build-args: VERSION_TAG=${{ steps.versionNumber.outputs.versionNumber }}
-          platforms: linux/amd64,linux/arm64/v8
-          provenance: true
-          sbom: true
+      # - name: Build and push Dockerfile-ultra-lite
+      #   id: build-push-lite
+      #   uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      #   if: github.ref != 'refs/heads/main'
+      #   with:
+      #     context: .
+      #     file: ./Dockerfile.ultra-lite
+      #     push: true
+      #     cache-from: type=gha
+      #     cache-to: type=gha,mode=max
+      #     tags: ${{ steps.meta2.outputs.tags }}
+      #     labels: ${{ steps.meta2.outputs.labels }}
+      #     build-args: VERSION_TAG=${{ steps.versionNumber.outputs.versionNumber }}
+      #     platforms: linux/amd64,linux/arm64/v8
+      #     provenance: true
+      #     sbom: true
 
-      - name: Generate tags fat
-        id: meta3
-        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
-        with:
-          images: |
-            # ${{ secrets.DOCKER_HUB_USERNAME }}/s-pdf
-            ghcr.io/${{ steps.repoowner.outputs.lowercase }}/s-pdf
-            ghcr.io/${{ steps.repoowner.outputs.lowercase }}/stirling-pdf
-            # ${{ secrets.DOCKER_HUB_ORG_USERNAME }}/stirling-pdf
-          tags: |
-            type=raw,value=${{ steps.versionNumber.outputs.versionNumber }}-fat,enable=${{ github.ref == 'refs/heads/master' }}
-            type=raw,value=latest-fat,enable=${{ github.ref == 'refs/heads/master' }}
-            type=raw,value=alpha,enable=${{ github.ref == 'refs/heads/main' }}
+      # - name: Generate tags fat
+      #   id: meta3
+      #   uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+      #   with:
+      #     images: |
+      #       # ${{ secrets.DOCKER_HUB_USERNAME }}/s-pdf
+      #       ghcr.io/${{ steps.repoowner.outputs.lowercase }}/s-pdf
+      #       ghcr.io/${{ steps.repoowner.outputs.lowercase }}/stirling-pdf
+      #       # ${{ secrets.DOCKER_HUB_ORG_USERNAME }}/stirling-pdf
+      #     tags: |
+      #       type=raw,value=${{ steps.versionNumber.outputs.versionNumber }}-fat,enable=${{ github.ref == 'refs/heads/master' }}
+      #       type=raw,value=latest-fat,enable=${{ github.ref == 'refs/heads/master' }}
+      #       type=raw,value=alpha,enable=${{ github.ref == 'refs/heads/main' }}
 
-      - name: Build and push main Dockerfile fat
-        id: build-push-fat
-        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
-        with:
-          builder: ${{ steps.buildx.outputs.name }}
-          context: .
-          file: ./Dockerfile.fat
-          push: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          tags: ${{ steps.meta3.outputs.tags }}
-          labels: ${{ steps.meta3.outputs.labels }}
-          build-args: VERSION_TAG=${{ steps.versionNumber.outputs.versionNumber }}
-          platforms: linux/amd64,linux/arm64/v8
-          provenance: true
-          sbom: true
+      # - name: Build and push main Dockerfile fat
+      #   id: build-push-fat
+      #   uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+      #   with:
+      #     builder: ${{ steps.buildx.outputs.name }}
+      #     context: .
+      #     file: ./Dockerfile.fat
+      #     push: true
+      #     cache-from: type=gha
+      #     cache-to: type=gha,mode=max
+      #     tags: ${{ steps.meta3.outputs.tags }}
+      #     labels: ${{ steps.meta3.outputs.labels }}
+      #     build-args: VERSION_TAG=${{ steps.versionNumber.outputs.versionNumber }}
+      #     platforms: linux/amd64,linux/arm64/v8
+      #     provenance: true
+      #     sbom: true
 
-      - name: Sign fat images
-        if: github.ref == 'refs/heads/master'
-        env:
-          DIGEST: ${{ steps.build-push-fat.outputs.digest }}
-          TAGS: ${{ steps.meta3.outputs.tags }}
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-        run: |
-          echo "$TAGS" | tr ',' '\n' | while read -r tag; do
-            cosign sign --key env://COSIGN_PRIVATE_KEY --yes "${tag}@${DIGEST}"
-          done
+      # - name: Sign fat images
+      #   if: github.ref == 'refs/heads/master'
+      #   env:
+      #     DIGEST: ${{ steps.build-push-fat.outputs.digest }}
+      #     TAGS: ${{ steps.meta3.outputs.tags }}
+      #     COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      #     COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      #   run: |
+      #     echo "$TAGS" | tr ',' '\n' | while read -r tag; do
+      #       cosign sign --key env://COSIGN_PRIVATE_KEY --yes "${tag}@${DIGEST}"
+      #     done
