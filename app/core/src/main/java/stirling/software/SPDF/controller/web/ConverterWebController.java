@@ -1,13 +1,16 @@
 package stirling.software.SPDF.controller.web;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.ModelAndView;
 
 import io.swagger.v3.oas.annotations.Hidden;
 import io.swagger.v3.oas.annotations.tags.Tag;
 
+import stirling.software.SPDF.config.EndpointConfiguration;
 import stirling.software.common.model.ApplicationProperties;
 import stirling.software.common.util.ApplicationContextProvider;
 import stirling.software.common.util.CheckProgramInstall;
@@ -47,6 +50,10 @@ public class ConverterWebController {
     @GetMapping("/pdf-to-cbr")
     @Hidden
     public String convertPdfToCbrForm(Model model) {
+        if (!ApplicationContextProvider.getBean(EndpointConfiguration.class)
+                .isEndpointEnabled("pdf-to-cbr")) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
         model.addAttribute("currentPage", "pdf-to-cbr");
         return "convert/pdf-to-cbr";
     }
@@ -164,6 +171,20 @@ public class ConverterWebController {
     public String pdfToOutlineForm(Model model) {
         model.addAttribute("currentPage", "pdf-to-outline");
         return "convert/pdf-to-outline";
+    }
+
+    @GetMapping("/pdf-to-vector")
+    @Hidden
+    public String pdfToVectorForm(Model model) {
+        model.addAttribute("currentPage", "pdf-to-vector");
+        return "convert/pdf-to-vector";
+    }
+
+    @GetMapping("/vector-to-pdf")
+    @Hidden
+    public String vectorToPdfForm(Model model) {
+        model.addAttribute("currentPage", "vector-to-pdf");
+        return "convert/vector-to-pdf";
     }
 
     @GetMapping("/eml-to-pdf")
