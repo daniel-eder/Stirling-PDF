@@ -1,16 +1,16 @@
 package stirling.software.SPDF.controller.api.converters;
 
 import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVPrinter;
 import org.apache.commons.csv.QuoteMode;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.http.ContentDisposition;
@@ -18,36 +18,36 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import stirling.software.SPDF.config.swagger.CsvConversionResponse;
 import stirling.software.SPDF.model.api.PDFWithPageNums;
-import stirling.software.SPDF.pdf.FlexibleCSVWriter;
+import stirling.software.SPDF.pdf.parser.PdfModels.TableFragment;
+import stirling.software.SPDF.pdf.parser.TabulaTableParser;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.ConvertApi;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.GeneralUtils;
+import stirling.software.common.util.WebResponseUtils;
 
-import technology.tabula.ObjectExtractor;
-import technology.tabula.Page;
-import technology.tabula.Table;
-import technology.tabula.extractors.SpreadsheetExtractionAlgorithm;
-
-@RestController
-@RequestMapping("/api/v1/convert")
-@Tag(name = "Convert", description = "Convert APIs")
+@ConvertApi
 @Slf4j
 @RequiredArgsConstructor
 public class ExtractCSVController {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final TabulaTableParser tabulaTableParser;
 
-    @PostMapping(value = "/pdf/csv", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @AutoJobPostMapping(
+            value = "/pdf/csv",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            resourceWeight = ResourceWeight.LARGE_WEIGHT)
+    @CsvConversionResponse
     @Operation(
             summary = "Extracts a CSV document from a PDF",
             description =
@@ -59,24 +59,23 @@ public class ExtractCSVController {
 
         try (PDDocument document = pdfDocumentFactory.load(request)) {
             List<Integer> pages = request.getPageNumbersList(document, true);
-            SpreadsheetExtractionAlgorithm sea = new SpreadsheetExtractionAlgorithm();
             CSVFormat format =
                     CSVFormat.EXCEL.builder().setEscape('"').setQuoteMode(QuoteMode.ALL).build();
 
             for (int pageNum : pages) {
-                try (ObjectExtractor extractor = new ObjectExtractor(document)) {
-                    log.info("{}", pageNum);
-                    Page page = extractor.extract(pageNum);
-                    List<Table> tables = sea.extract(page);
+                log.info("{}", pageNum);
+                List<TableFragment> fragments = tabulaTableParser.parse(document, pageNum);
 
-                    for (int i = 0; i < tables.size(); i++) {
-                        StringWriter sw = new StringWriter();
-                        FlexibleCSVWriter csvWriter = new FlexibleCSVWriter(format);
-                        csvWriter.write(sw, Collections.singletonList(tables.get(i)));
-
-                        String entryName = generateEntryName(baseName, pageNum, i + 1);
-                        csvEntries.add(new CsvEntry(entryName, sw.toString()));
+                for (int i = 0; i < fragments.size(); i++) {
+                    StringWriter sw = new StringWriter();
+                    try (CSVPrinter printer = format.print(sw)) {
+                        for (List<String> row : fragments.get(i).rawRows()) {
+                            printer.printRecord(row);
+                        }
                     }
+                    csvEntries.add(
+                            new CsvEntry(
+                                    generateEntryName(baseName, pageNum, i + 1), sw.toString()));
                 }
             }
 
@@ -91,7 +90,7 @@ public class ExtractCSVController {
     }
 
     private ResponseEntity<byte[]> createZipResponse(List<CsvEntry> entries, String baseName)
-            throws IOException {
+            throws Exception {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (ZipOutputStream zipOut = new ZipOutputStream(baos)) {
             for (CsvEntry entry : entries) {
@@ -102,14 +101,10 @@ public class ExtractCSVController {
             }
         }
 
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentDisposition(
-                ContentDisposition.builder("attachment")
-                        .filename(baseName + "_extracted.zip")
-                        .build());
-        headers.setContentType(MediaType.parseMediaType("application/zip"));
-
-        return ResponseEntity.ok().headers(headers).body(baos.toByteArray());
+        return WebResponseUtils.bytesToWebResponse(
+                baos.toByteArray(),
+                baseName + "_extracted.zip",
+                MediaType.APPLICATION_OCTET_STREAM);
     }
 
     private ResponseEntity<String> createCsvResponse(CsvEntry entry, String baseName) {
@@ -124,7 +119,7 @@ public class ExtractCSVController {
     }
 
     private String generateEntryName(String baseName, int pageNum, int tableIndex) {
-        return String.format("%s_p%d_t%d.csv", baseName, pageNum, tableIndex);
+        return String.format(Locale.ROOT, "%s_p%d_t%d.csv", baseName, pageNum, tableIndex);
     }
 
     private String getBaseName(String filename) {

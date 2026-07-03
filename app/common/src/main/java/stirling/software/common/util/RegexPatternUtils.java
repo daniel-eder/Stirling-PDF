@@ -1,5 +1,6 @@
 package stirling.software.common.util;
 
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -241,6 +242,11 @@ public final class RegexPatternUtils {
         return getPattern("\\s+");
     }
 
+    /** Pattern for matching punctuation characters */
+    public Pattern getPunctuationPattern() {
+        return getPattern("[\\p{Punct}]+");
+    }
+
     /** Pattern for matching newlines (Windows and Unix style) */
     public Pattern getNewlinesPattern() {
         return getPattern("\\r?\\n");
@@ -286,6 +292,24 @@ public final class RegexPatternUtils {
         return getPattern("[^a-zA-Z0-9 ]");
     }
 
+    /** Pattern for removing bracketed indices like [0], [Child], etc. in field names */
+    public Pattern getFormFieldBracketPattern() {
+        return getPattern("\\[[^\\]]*\\]");
+    }
+
+    /** Pattern that replaces underscores or hyphens with spaces */
+    public Pattern getUnderscoreHyphenPattern() {
+        return getPattern("[-_]+");
+    }
+
+    /**
+     * Pattern that matches camelCase or alpha-numeric boundaries to allow inserting spaces.
+     * Examples: firstName -> first Name, field1 -> field 1, A5Size -> A5 Size
+     */
+    public Pattern getCamelCaseBoundaryPattern() {
+        return getPattern("(?<=[a-z])(?=[A-Z])|(?<=[A-Za-z])(?=\\d)|(?<=\\d)(?=[A-Za-z])");
+    }
+
     /** Pattern for removing angle brackets */
     public Pattern getAngleBracketsPattern() {
         return getPattern("[<>]");
@@ -299,6 +323,11 @@ public final class RegexPatternUtils {
     /** Pattern for plus signs (URL encoding replacement) */
     public Pattern getPlusSignPattern() {
         return getPattern("\\+");
+    }
+
+    /** Pattern for splitting on pipe delimiter (used for hint lists in i18n messages) */
+    public Pattern getPipeDelimiterPattern() {
+        return getPattern("\\|");
     }
 
     /** Pattern for username validation */
@@ -333,6 +362,26 @@ public final class RegexPatternUtils {
     /** Pattern for matching 1-3 digit numbers */
     public Pattern getNumberRangePattern() {
         return getPattern("[1-9][0-9]{0,2}");
+    }
+
+    /**
+     * Pattern for very simple generic field tokens such as "field", "text", "checkbox" with
+     * optional numeric suffix (e.g. "field 1"). Case-insensitive.
+     */
+    public Pattern getGenericFieldNamePattern() {
+        return getPattern(
+                "^(field|text|checkbox|radio|button|signature|name|value|option|select|choice)(\\s*\\d+)?$",
+                Pattern.CASE_INSENSITIVE);
+    }
+
+    /** Pattern for short identifiers like t1, f2, a10 etc. */
+    public Pattern getSimpleFormFieldPattern() {
+        return getPattern("^[A-Za-z]{1,2}\\s*\\d{1,3}$");
+    }
+
+    /** Pattern for optional leading 't' followed by digits, e.g., t1, 1, t 12. */
+    public Pattern getOptionalTNumericPattern() {
+        return getPattern("^(?:t\\s*)?\\d+$", Pattern.CASE_INSENSITIVE);
     }
 
     /** Pattern for validating mathematical expressions */
@@ -467,6 +516,11 @@ public final class RegexPatternUtils {
         return getPattern("/");
     }
 
+    /** Supported logical types when creating new fields programmatically */
+    public Set<String> getSupportedNewFieldTypes() {
+        return Set.of("text", "checkbox", "combobox", "listbox", "radio", "button", "signature");
+    }
+
     /**
      * Pre-compile commonly used patterns for immediate availability. This eliminates first-call
      * compilation overhead for frequent patterns.
@@ -484,9 +538,9 @@ public final class RegexPatternUtils {
         getPattern("[^a-zA-Z0-9 ]"); // Input sanitization
         getPattern("[^a-zA-Z0-9]"); // Filename sanitization
         // API doc patterns
-        getPattern("Output:(\\w+)"); // precompiled single-escaped for runtime regex \w
-        getPattern("Input:(\\w+)");
-        getPattern("Type:(\\w+)");
+        getPattern("Output:\\s*(\\w+)");
+        getPattern("Input:\\s*(\\w+)");
+        getPattern("Type:\\s*(\\w+)");
         log.debug("Pre-compiled {} common regex patterns", patternCache.size());
     }
 
@@ -498,24 +552,34 @@ public final class RegexPatternUtils {
 
     /* Pattern for matching Output:<TYPE> in API descriptions */
     public Pattern getApiDocOutputTypePattern() {
-        return getPattern("Output:(\\w+)");
+        return getPattern("Output:\\s*(\\w+)");
     }
 
     /* Pattern for matching Input:<TYPE> in API descriptions */
     public Pattern getApiDocInputTypePattern() {
-        return getPattern("Input:(\\w+)");
+        return getPattern("Input:\\s*(\\w+)");
     }
 
     /**
      * Pattern for matching Type:<CODE> in API descriptions
      */
     public Pattern getApiDocTypePattern() {
-        return getPattern("Type:(\\w+)");
+        return getPattern("Type:\\s*(\\w+)");
     }
 
     /* Pattern for validating file extensions (2-4 alphanumeric, case-insensitive) */
     public Pattern getFileExtensionValidationPattern() {
         return getPattern("^[a-zA-Z0-9]{2,4}$", Pattern.CASE_INSENSITIVE);
+    }
+
+    /** Pattern for splitting on line breaks (Unicode line separator) */
+    public Pattern getLineSeparatorPattern() {
+        return getPattern("\\R");
+    }
+
+    /** Pattern for removing leading asterisks and whitespace */
+    public Pattern getLeadingAsterisksWhitespacePattern() {
+        return getPattern("^[*\\s]+");
     }
 
     private record PatternKey(String regex, int flags) {

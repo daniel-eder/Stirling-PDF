@@ -4,6 +4,8 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
@@ -33,14 +35,21 @@ import stirling.software.common.configuration.InstallationPathConfig;
 @UtilityClass
 public class GeneralUtils {
 
-    /** Maximum number of resolved DNS addresses allowed for a host before it is considered unsafe. */
+    /**
+     * Maximum number of resolved DNS addresses allowed for a host before it is considered unsafe.
+     */
     private static final int MAX_DNS_ADDRESSES = 20;
+
+    // Constants for size conversion
+    private static final BigDecimal KIB = BigDecimal.valueOf(1024L);
+    private static final BigDecimal LONG_MAX_DECIMAL = BigDecimal.valueOf(Long.MAX_VALUE);
 
     private final Set<String> DEFAULT_VALID_SCRIPTS = Set.of("png_to_webp.py", "split_photos.py");
     private final Set<String> DEFAULT_VALID_PIPELINE =
             Set.of(
                     "OCR images.json",
                     "Prepare-pdfs-for-email.json",
+                    "Pre-publish-sanitization.json",
                     "split-rotate-auto-rename.json");
 
     private final String DEFAULT_WEBUI_CONFIGS_DIR = "defaultWebUIConfigs";
@@ -88,34 +97,16 @@ public class GeneralUtils {
             while ((bytesRead = inputStream.read(buffer)) != -1) {
                 outputStream.write(buffer, 0, bytesRead);
             }
+        } catch (IOException e) {
+            if (tempFile.exists()) {
+                try {
+                    Files.delete(tempFile.toPath());
+                } catch (IOException ignored) {
+                }
+            }
+            throw e;
         }
         return tempFile;
-    }
-
-    /*
-     * Gets the configured temporary directory, creating it if necessary.
-     *
-     * @return Path to the temporary directory
-     * @throws IOException if directory creation fails
-     */
-    private Path getTempDirectory() throws IOException {
-        String customTempDir = System.getenv("STIRLING_TEMPFILES_DIRECTORY");
-        if (customTempDir == null || customTempDir.isEmpty()) {
-            customTempDir = System.getProperty("stirling.tempfiles.directory");
-        }
-
-        Path tempDir;
-        if (customTempDir != null && !customTempDir.isEmpty()) {
-            tempDir = Path.of(customTempDir);
-        } else {
-            tempDir = Path.of(System.getProperty("java.io.tmpdir"), "stirling-pdf");
-        }
-
-        if (!Files.exists(tempDir)) {
-            Files.createDirectories(tempDir);
-        }
-
-        return tempDir;
     }
 
     /*
@@ -264,7 +255,7 @@ public class GeneralUtils {
         String pattern = locationPattern;
         if (pattern.startsWith("file:")) {
             String rawPath = pattern.substring(5).replace("\\*", "").replace("/*", "");
-            Path normalizePath = Paths.get(rawPath).normalize();
+            Path normalizePath = Path.of(rawPath).normalize();
             pattern = "file:" + normalizePath.toString().replace("\\", "/") + "/*";
         }
         return ResourcePatternUtils.getResourcePatternResolver(resourceLoader)
@@ -298,8 +289,8 @@ public class GeneralUtils {
     }
 
     /**
-     * Checks whether a URL is reachable using configurable timeouts. Only {@code http} and
-     * {@code https} protocols are permitted, and local/private/multicast ranges are blocked.
+     * Checks whether a URL is reachable using configurable timeouts. Only {@code http} and {@code
+     * https} protocols are permitted, and local/private/multicast ranges are blocked.
      *
      * @param urlStr the URL to probe
      * @param connectTimeout connection timeout in milliseconds
@@ -417,8 +408,8 @@ public class GeneralUtils {
     }
 
     /**
-     * Checks whether an IPv4 address is private or reserved. Any malformed input defaults to
-     * {@code true} (conservative) to avoid misuse.
+     * Checks whether an IPv4 address is private or reserved. Any malformed input defaults to {@code
+     * true} (conservative) to avoid misuse.
      *
      * @param address 4-byte IPv4 address
      * @return {@code true} if private/reserved
@@ -488,8 +479,8 @@ public class GeneralUtils {
     }
 
     /**
-     * Checks whether an IPv6 address is an IPv4-mapped address (::ffff:0:0/96). Any malformed
-     * input defaults to {@code false} (conservative) to avoid misuse.
+     * Checks whether an IPv6 address is an IPv4-mapped address (::ffff:0:0/96). Any malformed input
+     * defaults to {@code false} (conservative) to avoid misuse.
      *
      * @param address 16-byte IPv6 address
      * @return {@code true} if IPv4-mapped
@@ -522,6 +513,12 @@ public class GeneralUtils {
             while ((bytesRead = in.read(buffer)) != -1) {
                 out.write(buffer, 0, bytesRead);
             }
+        } catch (IOException e) {
+            try {
+                Files.deleteIfExists(tempFile);
+            } catch (IOException ignored) {
+            }
+            throw e;
         }
         return tempFile.toFile();
     }
@@ -543,44 +540,31 @@ public class GeneralUtils {
             throw new IllegalArgumentException("Invalid default unit: " + defaultUnit);
         }
 
-        sizeStr = sizeStr.trim().toUpperCase();
+        sizeStr = sizeStr.trim().toUpperCase(Locale.ROOT);
         sizeStr = sizeStr.replace(",", ".").replace(" ", "");
 
         try {
             if (sizeStr.endsWith("TB")) {
-                return (long)
-                        (Double.parseDouble(sizeStr.substring(0, sizeStr.length() - 2))
-                                * 1024L
-                                * 1024L
-                                * 1024L
-                                * 1024L);
+                return toBytes(parseSizeValue(sizeStr.substring(0, sizeStr.length() - 2)), 4);
             } else if (sizeStr.endsWith("GB")) {
-                return (long)
-                        (Double.parseDouble(sizeStr.substring(0, sizeStr.length() - 2))
-                                * 1024L
-                                * 1024L
-                                * 1024L);
+                return toBytes(parseSizeValue(sizeStr.substring(0, sizeStr.length() - 2)), 3);
             } else if (sizeStr.endsWith("MB")) {
-                return (long)
-                        (Double.parseDouble(sizeStr.substring(0, sizeStr.length() - 2))
-                                * 1024L
-                                * 1024L);
+                return toBytes(parseSizeValue(sizeStr.substring(0, sizeStr.length() - 2)), 2);
             } else if (sizeStr.endsWith("KB")) {
-                return (long)
-                        (Double.parseDouble(sizeStr.substring(0, sizeStr.length() - 2)) * 1024L);
+                return toBytes(parseSizeValue(sizeStr.substring(0, sizeStr.length() - 2)), 1);
             } else if (!sizeStr.isEmpty() && sizeStr.charAt(sizeStr.length() - 1) == 'B') {
-                return Long.parseLong(sizeStr.substring(0, sizeStr.length() - 1));
+                return toBytes(parseSizeValue(sizeStr.substring(0, sizeStr.length() - 1)), 0);
             } else {
                 // Use provided default unit or fall back to MB
-                String unit = defaultUnit != null ? defaultUnit.toUpperCase() : "MB";
-                double value = Double.parseDouble(sizeStr);
+                String unit = defaultUnit != null ? defaultUnit.toUpperCase(Locale.ROOT) : "MB";
+                BigDecimal value = parseSizeValue(sizeStr);
                 return switch (unit) {
-                    case "TB" -> (long) (value * 1024L * 1024L * 1024L * 1024L);
-                    case "GB" -> (long) (value * 1024L * 1024L * 1024L);
-                    case "MB" -> (long) (value * 1024L * 1024L);
-                    case "KB" -> (long) (value * 1024L);
-                    case "B" -> (long) value;
-                    default -> (long) (value * 1024L * 1024L); // Default to MB
+                    case "TB" -> toBytes(value, 4);
+                    case "GB" -> toBytes(value, 3);
+                    case "MB" -> toBytes(value, 2);
+                    case "KB" -> toBytes(value, 1);
+                    case "B" -> toBytes(value, 0);
+                    default -> toBytes(value, 2); // Default to MB
                 };
             }
         } catch (NumberFormatException e) {
@@ -599,6 +583,30 @@ public class GeneralUtils {
         return convertSizeToBytes(sizeStr, "MB");
     }
 
+    private Long toBytes(BigDecimal value, int powerOf1024) {
+        if (value == null) {
+            return null;
+        }
+        if (value.compareTo(BigDecimal.ZERO) < 0) {
+            log.warn("Size value cannot be negative: {}", value);
+            return null;
+        }
+        if (powerOf1024 < 0 || powerOf1024 > 4) {
+            throw new IllegalArgumentException("Invalid power for size conversion: " + powerOf1024);
+        }
+        BigDecimal multiplier = powerOf1024 == 0 ? BigDecimal.ONE : KIB.pow(powerOf1024);
+        BigDecimal bytes = value.multiply(multiplier).setScale(0, RoundingMode.DOWN);
+        if (bytes.compareTo(LONG_MAX_DECIMAL) > 0) {
+            log.warn("Size value too large to fit in long: {}", bytes);
+            return null;
+        }
+        return bytes.longValue();
+    }
+
+    private BigDecimal parseSizeValue(String value) {
+        return new BigDecimal(value);
+    }
+
     /* Validates if a string represents a valid size unit. */
     private boolean isValidSizeUnit(String unit) {
         // Use a precomputed Set for O(1) lookup, normalize using a locale-safe toUpperCase
@@ -614,13 +622,14 @@ public class GeneralUtils {
         if (bytes < 1024) {
             return bytes + " B";
         } else if (bytes < 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f KB", bytes / 1024.0);
+            return String.format(Locale.ROOT, "%.2f KB", bytes / 1024.0);
         } else if (bytes < 1024L * 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f MB", bytes / (1024.0 * 1024.0));
+            return String.format(Locale.ROOT, "%.2f MB", bytes / (1024.0 * 1024.0));
         } else if (bytes < 1024L * 1024L * 1024L * 1024L) {
-            return String.format(Locale.US, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+            return String.format(Locale.ROOT, "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
         } else {
-            return String.format(Locale.US, "%.2f TB", bytes / (1024.0 * 1024.0 * 1024.0 * 1024.0));
+            return String.format(
+                    Locale.ROOT, "%.2f TB", bytes / (1024.0 * 1024.0 * 1024.0 * 1024.0));
         }
     }
 
@@ -640,8 +649,10 @@ public class GeneralUtils {
     }
 
     public List<Integer> parsePageList(String[] pages, int totalPages, boolean oneBased) {
-        List<Integer> result = new ArrayList<>();
+        // Use LinkedHashSet to prevent duplicates from inflating size and triggering maxSize guard
+        Set<Integer> result = new LinkedHashSet<>();
         int offset = oneBased ? 1 : 0;
+        int maxSize = Math.max(1000, totalPages * 3);
         for (String page : pages) {
             if ("all".equalsIgnoreCase(page)) {
 
@@ -657,8 +668,12 @@ public class GeneralUtils {
             } else {
                 result.addAll(handlePart(page, totalPages, offset));
             }
+            if (result.size() > maxSize) {
+                throw new IllegalArgumentException(
+                        "Page list exceeds maximum allowed size of " + maxSize);
+            }
         }
-        return result;
+        return new ArrayList<>(result);
     }
 
     /*
@@ -822,7 +837,7 @@ public class GeneralUtils {
     }
 
     public boolean createDir(String path) {
-        Path folder = Paths.get(path);
+        Path folder = Path.of(path);
         if (!Files.exists(folder)) {
             try {
                 Files.createDirectories(folder);
@@ -852,9 +867,39 @@ public class GeneralUtils {
 
     public void saveKeyToSettings(String key, Object newValue) throws IOException {
         String[] keyArray = key.split("\\.");
-        Path settingsPath = Paths.get(InstallationPathConfig.getSettingsPath());
+        Path settingsPath = Path.of(InstallationPathConfig.getSettingsPath());
         YamlHelper settingsYaml = new YamlHelper(settingsPath);
         settingsYaml.updateValue(Arrays.asList(keyArray), newValue);
+        settingsYaml.saveOverride(settingsPath);
+    }
+
+    /**
+     * Updates multiple settings in a single transaction. This ensures that nested settings (e.g.,
+     * oauth2.client.google.*) don't lose sibling values when partial updates are made.
+     *
+     * <p>Instead of multiple read-update-write cycles (which could cause race conditions), this
+     * method loads the YAML once, applies all updates, and saves once.
+     *
+     * @param settingsMap Map of dotted-notation keys to values to update
+     * @throws IOException if file read/write fails
+     */
+    public void updateSettingsTransactional(Map<String, Object> settingsMap) throws IOException {
+        if (settingsMap == null || settingsMap.isEmpty()) {
+            return;
+        }
+
+        Path settingsPath = Path.of(InstallationPathConfig.getSettingsPath());
+        YamlHelper settingsYaml = new YamlHelper(settingsPath);
+
+        // Apply all updates to the same YamlHelper instance
+        for (Map.Entry<String, Object> entry : settingsMap.entrySet()) {
+            String key = entry.getKey();
+            Object value = entry.getValue();
+            String[] keyArray = key.split("\\.");
+            settingsYaml.updateValue(Arrays.asList(keyArray), value);
+        }
+
+        // Save only once after all updates are applied
         settingsYaml.saveOverride(settingsPath);
     }
 
@@ -880,7 +925,7 @@ public class GeneralUtils {
                         byte[] mac = net.getHardwareAddress();
                         if (mac != null && mac.length > 0) {
                             for (byte b : mac) {
-                                sb.append(String.format("%02X", b));
+                                sb.append(String.format(Locale.ROOT, "%02X", b));
                             }
                             break; // Use the first valid network interface
                         }
@@ -890,7 +935,7 @@ public class GeneralUtils {
                 byte[] mac = network.getHardwareAddress();
                 if (mac != null) {
                     for (byte b : mac) {
-                        sb.append(String.format("%02X", b));
+                        sb.append(String.format(Locale.ROOT, "%02X", b));
                     }
                 }
             }
@@ -929,11 +974,11 @@ public class GeneralUtils {
      */
     public void extractPipeline() throws IOException {
         Path pipelineDir =
-                Paths.get(InstallationPathConfig.getPipelinePath(), DEFAULT_WEBUI_CONFIGS_DIR);
+                Path.of(InstallationPathConfig.getPipelinePath(), DEFAULT_WEBUI_CONFIGS_DIR);
         Files.createDirectories(pipelineDir);
 
         for (String name : DEFAULT_VALID_PIPELINE) {
-            if (!Paths.get(name).getFileName().toString().equals(name)) {
+            if (!Path.of(name).getFileName().toString().equals(name)) {
                 log.error("Invalid pipeline file name: {}", name);
                 throw new IllegalArgumentException("Invalid pipeline file name: " + name);
             }
@@ -969,7 +1014,7 @@ public class GeneralUtils {
             throw new IllegalArgumentException(
                     "scriptName must not contain path traversal characters");
         }
-        if (!Paths.get(scriptName).getFileName().toString().equals(scriptName)) {
+        if (!Path.of(scriptName).getFileName().toString().equals(scriptName)) {
             throw new IllegalArgumentException(
                     "scriptName must not contain path traversal characters");
         }
@@ -979,7 +1024,7 @@ public class GeneralUtils {
                     "scriptName must be either 'png_to_webp.py' or 'split_photos.py'");
         }
 
-        Path scriptsDir = Paths.get(InstallationPathConfig.getScriptsPath(), PYTHON_SCRIPTS_DIR);
+        Path scriptsDir = Path.of(InstallationPathConfig.getScriptsPath(), PYTHON_SCRIPTS_DIR);
         Files.createDirectories(scriptsDir);
 
         Path target = scriptsDir.resolve(scriptName);
@@ -1097,17 +1142,29 @@ public class GeneralUtils {
                     ProcessExecutor.getInstance(ProcessExecutor.Processes.GHOSTSCRIPT)
                             .runCommandWithOutputHandling(command);
 
+            ExceptionUtils.GhostscriptException detectedError =
+                    ExceptionUtils.detectGhostscriptCriticalError(result.getMessages());
+            if (detectedError != null) {
+                log.warn(
+                        "Ghostscript ebook optimization reported a critical error: {}",
+                        detectedError.getMessage());
+                throw detectedError;
+            }
+
             if (result.getRc() != 0) {
                 log.warn(
                         "Ghostscript ebook optimization failed with return code: {}",
                         result.getRc());
-                throw ExceptionUtils.createGhostscriptCompressionException();
+                throw ExceptionUtils.createGhostscriptCompressionException(result.getMessages());
             }
 
             return Files.readAllBytes(tempOutput);
 
         } catch (Exception e) {
             log.warn("Ghostscript ebook optimization failed", e);
+            if (e instanceof ExceptionUtils.GhostscriptException ghostscriptException) {
+                throw ghostscriptException;
+            }
             throw ExceptionUtils.createGhostscriptCompressionException(e);
         } finally {
             if (tempInput != null) {
@@ -1126,4 +1183,183 @@ public class GeneralUtils {
             }
         }
     }
+
+    public String getLocalNetworkIp() {
+        String routed = detectLocalIpViaDefaultRoute();
+        if (routed != null) {
+            return routed;
+        }
+        try {
+            return selectBestSiteLocalIp(collectInterfaceInfo());
+        } catch (Exception e) {
+            log.warn("Failed to detect local network IP", e);
+            return null;
+        }
+    }
+
+    private String detectLocalIpViaDefaultRoute() {
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(InetAddress.getByName("8.8.8.8"), 53);
+            InetAddress local = socket.getLocalAddress();
+            if (local instanceof Inet4Address
+                    && !local.isAnyLocalAddress()
+                    && !local.isLoopbackAddress()
+                    && !local.isLinkLocalAddress()) {
+                return local.getHostAddress();
+            }
+        } catch (Exception e) {
+            log.debug("Default-route IP detection failed; will scan interfaces", e);
+        }
+        return null;
+    }
+
+    private List<NetworkInterfaceInfo> collectInterfaceInfo() throws SocketException {
+        List<NetworkInterfaceInfo> infos = new ArrayList<>();
+        Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+        if (interfaces == null) {
+            return infos;
+        }
+        while (interfaces.hasMoreElements()) {
+            NetworkInterface iface = interfaces.nextElement();
+
+            List<String> siteLocalIpv4s = new ArrayList<>();
+            Enumeration<InetAddress> addresses = iface.getInetAddresses();
+            while (addresses.hasMoreElements()) {
+                InetAddress addr = addresses.nextElement();
+                if (addr instanceof Inet4Address && addr.isSiteLocalAddress()) {
+                    siteLocalIpv4s.add(addr.getHostAddress());
+                }
+            }
+            if (siteLocalIpv4s.isEmpty()) {
+                continue;
+            }
+
+            try {
+                byte[] mac = iface.getHardwareAddress();
+                infos.add(
+                        new NetworkInterfaceInfo(
+                                iface.getName(),
+                                iface.getDisplayName(),
+                                iface.getIndex(),
+                                iface.isUp(),
+                                iface.isLoopback(),
+                                iface.isPointToPoint(),
+                                iface.isVirtual(),
+                                mac != null && mac.length > 0,
+                                siteLocalIpv4s));
+            } catch (SocketException e) {
+                log.debug("Skipping interface {} while scanning for local IP", iface.getName(), e);
+            }
+        }
+        return infos;
+    }
+
+    static String selectBestSiteLocalIp(List<NetworkInterfaceInfo> interfaces) {
+        return interfaces.stream()
+                .filter(i -> i.up() && !i.loopback() && !i.pointToPoint() && !i.virtual())
+                .filter(i -> !isLikelyVirtualInterface(i.name(), i.displayName()))
+                .flatMap(
+                        i ->
+                                i.siteLocalIpv4s().stream()
+                                        .map(
+                                                ip ->
+                                                        new ScoredAddress(
+                                                                ip,
+                                                                scoreInterface(i, ip),
+                                                                i.index())))
+                .max(
+                        Comparator.comparingInt(ScoredAddress::score)
+                                .thenComparing(
+                                        Comparator.comparingInt(ScoredAddress::interfaceIndex)
+                                                .reversed()))
+                .map(ScoredAddress::ip)
+                .orElse(null);
+    }
+
+    private static int scoreInterface(NetworkInterfaceInfo iface, String ip) {
+        int score = 0;
+        if (isLikelyPhysicalInterface(iface.name(), iface.displayName())) {
+            score += 100;
+        }
+        if (iface.hasHardwareAddress()) {
+            score += 20;
+        }
+        if (ip.startsWith("192.168.")) {
+            score += 30;
+        } else if (ip.startsWith("10.")) {
+            score += 20;
+        } else {
+            score += 5;
+        }
+        return score;
+    }
+
+    static boolean isLikelyVirtualInterface(String name, String displayName) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        String d = displayName == null ? "" : displayName.toLowerCase(Locale.ROOT);
+        String[] namePrefixes = {
+            "tun", "tap", "utun", "veth", "virbr", "vmnet", "docker", "br-", "wg", "ppp", "awdl",
+            "llw"
+        };
+        for (String prefix : namePrefixes) {
+            if (n.startsWith(prefix)) {
+                return true;
+            }
+        }
+        String[] displayMarkers = {
+            "vmware",
+            "virtualbox",
+            "virtual box",
+            "vbox",
+            "hyper-v",
+            "hyperv",
+            "vethernet",
+            "windows subsystem for linux",
+            "wsl",
+            "docker",
+            "tap-windows",
+            "tunnel",
+            "vpn",
+            "zerotier",
+            "tailscale",
+            "bluetooth",
+            "teredo",
+            "isatap",
+            "loopback",
+            "pseudo",
+            "virtual"
+        };
+        for (String marker : displayMarkers) {
+            if (d.contains(marker)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isLikelyPhysicalInterface(String name, String displayName) {
+        String n = name == null ? "" : name.toLowerCase(Locale.ROOT);
+        String d = displayName == null ? "" : displayName.toLowerCase(Locale.ROOT);
+        return n.startsWith("eth")
+                || n.startsWith("en")
+                || n.startsWith("wl")
+                || n.startsWith("em")
+                || d.contains("ethernet")
+                || d.contains("wi-fi")
+                || d.contains("wifi")
+                || d.contains("wireless");
+    }
+
+    record NetworkInterfaceInfo(
+            String name,
+            String displayName,
+            int index,
+            boolean up,
+            boolean loopback,
+            boolean pointToPoint,
+            boolean virtual,
+            boolean hasHardwareAddress,
+            List<String> siteLocalIpv4s) {}
+
+    private record ScoredAddress(String ip, int score, int interfaceIndex) {}
 }

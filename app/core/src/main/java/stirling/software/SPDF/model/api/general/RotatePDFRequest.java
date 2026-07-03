@@ -13,9 +13,9 @@ public class RotatePDFRequest extends PDFFile {
 
     @Schema(
             description =
-                    "The angle by which to rotate the PDF file. This should be a multiple of 90.",
+                    "The clockwise angle by which to rotate all pages in the PDF file. Must be a multiple of 90.",
+            type = "integer",
             requiredMode = Schema.RequiredMode.REQUIRED,
-            allowableValues = {"0", "90", "180", "270"},
-            defaultValue = "90")
-    private Integer angle;
+            allowableValues = {"0", "90", "180", "270"})
+    private Integer angle = 90;
 }

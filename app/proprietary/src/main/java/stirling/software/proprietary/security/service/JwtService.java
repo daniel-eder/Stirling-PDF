@@ -4,8 +4,8 @@ import java.security.KeyPair;
 import java.security.NoSuchAlgorithmException;
 import java.security.PublicKey;
 import java.security.spec.InvalidKeySpecException;
-import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.Base64;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -13,15 +13,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.ResponseCookie;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.stereotype.Service;
 
-import io.github.pixee.security.Newlines;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
@@ -29,35 +27,38 @@ import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.UnsupportedJwtException;
 import io.jsonwebtoken.security.SignatureException;
 
-import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 
 import lombok.extern.slf4j.Slf4j;
 
+import stirling.software.common.constants.JwtConstants;
+import stirling.software.common.model.ApplicationProperties;
 import stirling.software.proprietary.security.model.JwtVerificationKey;
 import stirling.software.proprietary.security.model.exception.AuthenticationFailureException;
 import stirling.software.proprietary.security.saml2.CustomSaml2AuthenticatedPrincipal;
+
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Slf4j
 @Service
 public class JwtService implements JwtServiceInterface {
 
-    private static final String JWT_COOKIE_NAME = "stirling_jwt";
-    private static final String ISSUER = "Stirling PDF";
-    private static final long EXPIRATION = 3600000;
-
-    @Value("${stirling.security.jwt.secureCookie:true}")
-    private boolean secureCookie;
-
+    private final ObjectMapper objectMapper;
     private final KeyPersistenceServiceInterface keyPersistenceService;
     private final boolean v2Enabled;
+    private final ApplicationProperties.Security securityProperties;
 
+    @Autowired
     public JwtService(
+            ObjectMapper objectMapper,
             @Qualifier("v2Enabled") boolean v2Enabled,
-            KeyPersistenceServiceInterface keyPersistenceService) {
+            KeyPersistenceServiceInterface keyPersistenceService,
+            ApplicationProperties applicationProperties) {
+        this.objectMapper = objectMapper;
         this.v2Enabled = v2Enabled;
         this.keyPersistenceService = keyPersistenceService;
+        this.securityProperties = applicationProperties.getSecurity();
     }
 
     @Override
@@ -92,9 +93,10 @@ public class JwtService implements JwtServiceInterface {
                     Jwts.builder()
                             .claims(claims)
                             .subject(username)
-                            .issuer(ISSUER)
-                            .issuedAt(Date.from(Instant.now()))
-                            .expiration(Date.from(Instant.now().plusMillis(EXPIRATION)))
+                            .issuer(JwtConstants.ISSUER)
+                            .issuedAt(new Date())
+                            .expiration(
+                                    new Date(System.currentTimeMillis() + getExpirationMillis()))
                             .signWith(keyPair.getPrivate(), Jwts.SIG.RS256);
 
             String keyId = activeKey.getKeyId();
@@ -105,6 +107,40 @@ public class JwtService implements JwtServiceInterface {
             return builder.compact();
         } catch (Exception e) {
             throw new RuntimeException("Failed to generate token", e);
+        }
+    }
+
+    @Override
+    public String generateToken(String username, Map<String, Object> claims, int expiryMinutes) {
+        try {
+            JwtVerificationKey activeKey = keyPersistenceService.getActiveKey();
+            Optional<KeyPair> keyPairOpt = keyPersistenceService.getKeyPair(activeKey.getKeyId());
+
+            if (keyPairOpt.isEmpty()) {
+                throw new RuntimeException("Unable to retrieve key pair for active key");
+            }
+
+            KeyPair keyPair = keyPairOpt.get();
+            long customExpirationMillis = expiryMinutes * JwtConstants.MILLIS_PER_MINUTE;
+
+            var builder =
+                    Jwts.builder()
+                            .claims(claims)
+                            .subject(username)
+                            .issuer(JwtConstants.ISSUER)
+                            .issuedAt(new Date())
+                            .expiration(
+                                    new Date(System.currentTimeMillis() + customExpirationMillis))
+                            .signWith(keyPair.getPrivate(), Jwts.SIG.RS256);
+
+            String keyId = activeKey.getKeyId();
+            if (keyId != null) {
+                builder.header().keyId(keyId);
+            }
+
+            return builder.compact();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to generate token with custom expiry", e);
         }
     }
 
@@ -123,14 +159,25 @@ public class JwtService implements JwtServiceInterface {
     }
 
     @Override
+    public String extractUsernameAllowExpired(String token) {
+        return extractClaim(token, Claims::getSubject, true);
+    }
+
+    @Override
     public Map<String, Object> extractClaims(String token) {
         Claims claims = extractAllClaims(token);
         return new HashMap<>(claims);
     }
 
     @Override
+    public Map<String, Object> extractClaimsAllowExpired(String token) {
+        Claims claims = extractAllClaims(token, true);
+        return new HashMap<>(claims);
+    }
+
+    @Override
     public boolean isTokenExpired(String token) {
-        return extractExpiration(token).before(Date.from(Instant.now()));
+        return extractExpiration(token).before(new Date());
     }
 
     private Date extractExpiration(String token) {
@@ -138,11 +185,21 @@ public class JwtService implements JwtServiceInterface {
     }
 
     private <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
-        final Claims claims = extractAllClaims(token);
+        final Claims claims = extractAllClaims(token, false);
+        return claimsResolver.apply(claims);
+    }
+
+    private <T> T extractClaim(
+            String token, Function<Claims, T> claimsResolver, boolean allowExpired) {
+        final Claims claims = extractAllClaims(token, allowExpired);
         return claimsResolver.apply(claims);
     }
 
     private Claims extractAllClaims(String token) {
+        return extractAllClaims(token, false);
+    }
+
+    private Claims extractAllClaims(String token, boolean allowExpired) {
         try {
             String keyId = extractKeyId(token);
             KeyPair keyPair;
@@ -154,8 +211,7 @@ public class JwtService implements JwtServiceInterface {
                     keyPair = specificKeyPair.get();
                 } else {
                     log.warn(
-                            "Key ID {} not found in keystore, token may have been signed with an"
-                                    + " expired key",
+                            "Key ID {} not found in keystore, token may have been signed with an expired key",
                             keyId);
 
                     if (keyId.equals(keyPersistenceService.getActiveKey().getKeyId())) {
@@ -185,11 +241,12 @@ public class JwtService implements JwtServiceInterface {
             } else {
                 log.debug("No key ID in token header, trying all available keys");
                 // Try all available keys when no keyId is present
-                return tryAllKeys(token);
+                return tryAllKeys(token, allowExpired);
             }
 
             return Jwts.parser()
                     .verifyWith(keyPair.getPublic())
+                    .clockSkewSeconds(getAllowedClockSkewSeconds())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
@@ -200,7 +257,13 @@ public class JwtService implements JwtServiceInterface {
             log.warn("Invalid token: {}", e.getMessage());
             throw new AuthenticationFailureException("Invalid token", e);
         } catch (ExpiredJwtException e) {
-            log.warn("The token has expired: {}", e.getMessage());
+            if (allowExpired) {
+                log.debug(
+                        "Extracting claims from expired token (allowed for refresh grace period): {}",
+                        e.getMessage());
+                return e.getClaims();
+            }
+            log.warn("Token validation failed - token has expired: {}", e.getMessage());
             throw new AuthenticationFailureException("The token has expired", e);
         } catch (UnsupportedJwtException e) {
             log.warn("The token is unsupported: {}", e.getMessage());
@@ -211,7 +274,8 @@ public class JwtService implements JwtServiceInterface {
         }
     }
 
-    private Claims tryAllKeys(String token) throws AuthenticationFailureException {
+    private Claims tryAllKeys(String token, boolean allowExpired)
+            throws AuthenticationFailureException {
         // First try the active key
         try {
             JwtVerificationKey activeKey = keyPersistenceService.getActiveKey();
@@ -219,9 +283,18 @@ public class JwtService implements JwtServiceInterface {
                     keyPersistenceService.decodePublicKey(activeKey.getVerifyingKey());
             return Jwts.parser()
                     .verifyWith(publicKey)
+                    .clockSkewSeconds(getAllowedClockSkewSeconds())
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+        } catch (ExpiredJwtException e) {
+            if (allowExpired) {
+                log.debug(
+                        "Extracting claims from expired token (allowed for refresh grace period)");
+                return e.getClaims();
+            }
+            log.warn("Token validation failed - token has expired");
+            throw new AuthenticationFailureException("The token has expired", e);
         } catch (SignatureException
                 | NoSuchAlgorithmException
                 | InvalidKeySpecException activeKeyException) {
@@ -239,9 +312,15 @@ public class JwtService implements JwtServiceInterface {
                                     verificationKey.getVerifyingKey());
                     return Jwts.parser()
                             .verifyWith(publicKey)
+                            .clockSkewSeconds(getAllowedClockSkewSeconds())
                             .build()
                             .parseSignedClaims(token)
                             .getPayload();
+                } catch (ExpiredJwtException e) {
+                    if (allowExpired) {
+                        return e.getClaims();
+                    }
+                    throw new AuthenticationFailureException("The token has expired", e);
                 } catch (SignatureException
                         | NoSuchAlgorithmException
                         | InvalidKeySpecException e) {
@@ -260,45 +339,29 @@ public class JwtService implements JwtServiceInterface {
 
     @Override
     public String extractToken(HttpServletRequest request) {
-        Cookie[] cookies = request.getCookies();
-
-        if (cookies != null) {
-            for (Cookie cookie : cookies) {
-                if (JWT_COOKIE_NAME.equals(cookie.getName())) {
-                    return cookie.getValue();
-                }
-            }
+        // Extract from Authorization header Bearer token
+        String authHeader = request.getHeader("Authorization");
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            String token = authHeader.substring(7); // Remove "Bearer " prefix
+            return token;
         }
 
         return null;
     }
 
     @Override
-    public void addToken(HttpServletResponse response, String token) {
-        ResponseCookie cookie =
-                ResponseCookie.from(JWT_COOKIE_NAME, Newlines.stripAll(token))
-                        .httpOnly(true)
-                        .secure(secureCookie)
-                        .sameSite("Strict")
-                        .maxAge(EXPIRATION / 1000)
-                        .path("/")
-                        .build();
-
-        response.addHeader("Set-Cookie", cookie.toString());
-    }
-
-    @Override
-    public void clearToken(HttpServletResponse response) {
-        ResponseCookie cookie =
-                ResponseCookie.from(JWT_COOKIE_NAME, "")
-                        .httpOnly(true)
-                        .secure(secureCookie)
-                        .sameSite("None")
-                        .maxAge(0)
-                        .path("/")
-                        .build();
-
-        response.addHeader("Set-Cookie", cookie.toString());
+    public String extractUsernameFromRequestAllowExpired(HttpServletRequest request) {
+        try {
+            String token = extractToken(request);
+            if (token == null || token.isBlank()) {
+                return null;
+            }
+            String username = extractUsernameAllowExpired(token);
+            return (username != null && !username.isBlank()) ? username : null;
+        } catch (Exception e) {
+            log.debug("Could not extract username from request JWT: {}", e.getMessage());
+            return null;
+        }
     }
 
     @Override
@@ -306,25 +369,51 @@ public class JwtService implements JwtServiceInterface {
         return v2Enabled;
     }
 
+    /**
+     * Extract key ID from JWT header without validating the token.
+     *
+     * <p>Parses the Base64-encoded JWT header to retrieve the "kid" (key ID) claim. Returns null if
+     * the header cannot be parsed or does not contain a key ID.
+     *
+     * @param token the JWT token
+     * @return the key ID, or null if not found or parsing fails
+     */
     private String extractKeyId(String token) {
         try {
-            PublicKey signingKey =
-                    keyPersistenceService.decodePublicKey(
-                            keyPersistenceService.getActiveKey().getVerifyingKey());
+            String[] tokenParts = token.split("\\.");
+            if (tokenParts.length < 2) {
+                log.debug(
+                        "Token does not have enough parts (expected at least 2, got {})",
+                        tokenParts.length);
+                return null;
+            }
 
-            String keyId =
-                    (String)
-                            Jwts.parser()
-                                    .verifyWith(signingKey)
-                                    .build()
-                                    .parse(token)
-                                    .getHeader()
-                                    .get("kid");
-            log.debug("Extracted key ID from token: {}", keyId);
-            return keyId;
-        } catch (Exception e) {
-            log.warn("Failed to extract key ID from token header: {}", e.getMessage());
+            byte[] headerBytes = Base64.getUrlDecoder().decode(tokenParts[0]);
+            Map<String, Object> header =
+                    objectMapper.readValue(
+                            headerBytes, new TypeReference<Map<String, Object>>() {});
+            Object keyId = header.get("kid");
+            return keyId instanceof String ? (String) keyId : null;
+        } catch (IllegalArgumentException e) {
+            log.debug("Failed to decode Base64 JWT header: {}", e.getMessage());
+            return null;
+        } catch (tools.jackson.core.JacksonException e) {
+            log.debug("Failed to parse JWT header as JSON: {}", e.getMessage());
             return null;
         }
+    }
+
+    private long getExpirationMillis() {
+        int configuredMinutes = securityProperties.getJwt().getTokenExpiryMinutes();
+        int expiryMinutes =
+                configuredMinutes > 0
+                        ? configuredMinutes
+                        : JwtConstants.DEFAULT_TOKEN_EXPIRY_MINUTES;
+        return expiryMinutes * JwtConstants.MILLIS_PER_MINUTE;
+    }
+
+    private long getAllowedClockSkewSeconds() {
+        int configuredSeconds = securityProperties.getJwt().getAllowedClockSkewSeconds();
+        return configuredSeconds >= 0 ? configuredSeconds : JwtConstants.DEFAULT_CLOCK_SKEW_SECONDS;
     }
 }

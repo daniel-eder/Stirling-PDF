@@ -1,17 +1,14 @@
 package stirling.software.common.util;
 
-import java.io.ByteArrayInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -37,17 +34,17 @@ public class FileToPdf {
             try (TempFile tempInputFile =
                     new TempFile(
                             tempFileManager,
-                            fileName.toLowerCase().endsWith(".html") ? ".html" : ".zip")) {
+                            fileName.toLowerCase(Locale.ROOT).endsWith(".html")
+                                    ? ".html"
+                                    : ".zip")) {
 
-                if (fileName.toLowerCase().endsWith(".html")) {
+                if (fileName.toLowerCase(Locale.ROOT).endsWith(".html")) {
                     String sanitizedHtml =
                             sanitizeHtmlContent(
                                     new String(fileBytes, StandardCharsets.UTF_8),
                                     customHtmlSanitizer);
-                    Files.write(
-                            tempInputFile.getPath(),
-                            sanitizedHtml.getBytes(StandardCharsets.UTF_8));
-                } else if (fileName.toLowerCase().endsWith(".zip")) {
+                    Files.writeString(tempInputFile.getPath(), sanitizedHtml);
+                } else if (fileName.toLowerCase(Locale.ROOT).endsWith(".zip")) {
                     Files.write(tempInputFile.getPath(), fileBytes);
                     sanitizeHtmlFilesInZip(
                             tempInputFile.getPath(), tempFileManager, customHtmlSanitizer);
@@ -68,16 +65,7 @@ public class FileToPdf {
                         ProcessExecutor.getInstance(ProcessExecutor.Processes.WEASYPRINT)
                                 .runCommandWithOutputHandling(command);
 
-                byte[] pdfBytes = Files.readAllBytes(tempOutputFile.getPath());
-                try {
-                    return pdfBytes;
-                } catch (Exception e) {
-                    pdfBytes = Files.readAllBytes(tempOutputFile.getPath());
-                    if (pdfBytes.length < 1) {
-                        throw e;
-                    }
-                    return pdfBytes;
-                }
+                return Files.readAllBytes(tempOutputFile.getPath());
             } // tempInputFile auto-closed
         } // tempOutputFile auto-closed
     }
@@ -94,22 +82,27 @@ public class FileToPdf {
             throws IOException {
         try (TempDirectory tempUnzippedDir = new TempDirectory(tempFileManager)) {
             try (ZipInputStream zipIn =
-                    ZipSecurity.createHardenedInputStream(
-                            new ByteArrayInputStream(Files.readAllBytes(zipFilePath)))) {
+                    ZipSecurity.createHardenedInputStream(Files.newInputStream(zipFilePath))) {
                 ZipEntry entry = zipIn.getNextEntry();
                 while (entry != null) {
                     Path filePath =
                             tempUnzippedDir.getPath().resolve(sanitizeZipFilename(entry.getName()));
+                    Path normalizedTargetDir =
+                            tempUnzippedDir.getPath().toAbsolutePath().normalize();
+                    Path normalizedFilePath = filePath.toAbsolutePath().normalize();
+                    if (!normalizedFilePath.startsWith(normalizedTargetDir)) {
+                        throw new IOException(
+                                "Zip entry path escapes target directory: " + entry.getName());
+                    }
                     if (!entry.isDirectory()) {
                         Files.createDirectories(filePath.getParent());
-                        if (entry.getName().toLowerCase().endsWith(".html")
-                                || entry.getName().toLowerCase().endsWith(".htm")) {
+                        if (entry.getName().toLowerCase(Locale.ROOT).endsWith(".html")
+                                || entry.getName().toLowerCase(Locale.ROOT).endsWith(".htm")) {
                             String content =
                                     new String(zipIn.readAllBytes(), StandardCharsets.UTF_8);
                             String sanitizedContent =
                                     sanitizeHtmlContent(content, customHtmlSanitizer);
-                            Files.write(
-                                    filePath, sanitizedContent.getBytes(StandardCharsets.UTF_8));
+                            Files.writeString(filePath, sanitizedContent);
                         } else {
                             Files.copy(zipIn, filePath);
                         }
@@ -142,64 +135,6 @@ public class FileToPdf {
                                     }
                                 });
             }
-        }
-    }
-
-    private static void deleteDirectory(Path dir) throws IOException {
-        Files.walkFileTree(
-                dir,
-                new SimpleFileVisitor<Path>() {
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
-                            throws IOException {
-                        Files.delete(file);
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult postVisitDirectory(Path dir, IOException exc)
-                            throws IOException {
-                        Files.delete(dir);
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-    }
-
-    private static Path unzipAndGetMainHtml(byte[] fileBytes) throws IOException {
-        Path tempDirectory = Files.createTempDirectory("unzipped_");
-        try (ZipInputStream zipIn =
-                ZipSecurity.createHardenedInputStream(new ByteArrayInputStream(fileBytes))) {
-            ZipEntry entry = zipIn.getNextEntry();
-            while (entry != null) {
-                Path filePath = tempDirectory.resolve(sanitizeZipFilename(entry.getName()));
-                if (entry.isDirectory()) {
-                    Files.createDirectories(filePath); // Explicitly create the directory structure
-                } else {
-                    Files.createDirectories(
-                            filePath.getParent()); // Create parent directories if they don't exist
-                    Files.copy(zipIn, filePath);
-                }
-                zipIn.closeEntry();
-                entry = zipIn.getNextEntry();
-            }
-        }
-
-        // Search for the main HTML file.
-        try (Stream<Path> walk = Files.walk(tempDirectory)) {
-            List<Path> htmlFiles = walk.filter(file -> file.toString().endsWith(".html")).toList();
-
-            if (htmlFiles.isEmpty()) {
-                throw new IOException("No HTML files found in the unzipped directory.");
-            }
-
-            // Prioritize 'index.html' if it exists, otherwise use the first .html file
-            for (Path htmlFile : htmlFiles) {
-                if ("index.html".equals(htmlFile.getFileName().toString())) {
-                    return htmlFile;
-                }
-            }
-
-            return htmlFiles.get(0);
         }
     }
 

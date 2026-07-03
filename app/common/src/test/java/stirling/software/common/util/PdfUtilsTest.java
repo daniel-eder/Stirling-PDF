@@ -1,123 +1,245 @@
 package stirling.software.common.util;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
-import java.awt.Color;
-import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
+import java.awt.image.RenderedImage;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.List;
 
-import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.junit.jupiter.api.Test;
-import org.mockito.Mockito;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
-import stirling.software.common.model.ApplicationProperties;
-import stirling.software.common.service.CustomPDFDocumentFactory;
-import stirling.software.common.service.PdfMetadataService;
+class PdfUtilsTest {
 
-public class PdfUtilsTest {
-
-    @Test
-    void testTextToPageSize() {
-        assertEquals(PDRectangle.A4, PdfUtils.textToPageSize("A4"));
-        assertEquals(PDRectangle.LETTER, PdfUtils.textToPageSize("LETTER"));
-        assertThrows(IllegalArgumentException.class, () -> PdfUtils.textToPageSize("INVALID"));
+    @ParameterizedTest
+    @CsvSource({"A0", "A1", "A2", "A3", "A4", "A5", "A6", "LETTER", "LEGAL"})
+    void textToPageSize_validSizes_returnsCorrectRectangle(String size) {
+        PDRectangle result = PdfUtils.textToPageSize(size);
+        assertNotNull(result);
+        assertTrue(result.getWidth() > 0);
+        assertTrue(result.getHeight() > 0);
     }
 
     @Test
-    void testHasImagesOnPage() throws IOException {
-        // Mock a PDPage and its resources
-        PDPage page = Mockito.mock(PDPage.class);
-        PDResources resources = Mockito.mock(PDResources.class);
-        Mockito.when(page.getResources()).thenReturn(resources);
-
-        // Case 1: No images in resources
-        Mockito.when(resources.getXObjectNames()).thenReturn(Collections.emptySet());
-        assertFalse(PdfUtils.hasImagesOnPage(page));
-
-        // Case 2: Resources with an image
-        Set<COSName> xObjectNames = new HashSet<>();
-        COSName cosName = Mockito.mock(COSName.class);
-        xObjectNames.add(cosName);
-
-        PDImageXObject imageXObject = Mockito.mock(PDImageXObject.class);
-        Mockito.when(resources.getXObjectNames()).thenReturn(xObjectNames);
-        Mockito.when(resources.getXObject(cosName)).thenReturn(imageXObject);
-
-        assertTrue(PdfUtils.hasImagesOnPage(page));
+    void textToPageSize_lowercaseA4_returnsA4() {
+        PDRectangle result = PdfUtils.textToPageSize("a4");
+        assertEquals(PDRectangle.A4.getWidth(), result.getWidth(), 0.01f);
+        assertEquals(PDRectangle.A4.getHeight(), result.getHeight(), 0.01f);
     }
 
     @Test
-    void testPageCountComparators() throws Exception {
-        PDDocument doc1 = new PDDocument();
-        doc1.addPage(new PDPage());
-        doc1.addPage(new PDPage());
-        doc1.addPage(new PDPage());
-        assertTrue(PdfUtils.pageCount(doc1, 2, "greater"));
-
-        PDDocument doc2 = new PDDocument();
-        doc2.addPage(new PDPage());
-        doc2.addPage(new PDPage());
-        doc2.addPage(new PDPage());
-        assertTrue(PdfUtils.pageCount(doc2, 3, "equal"));
-
-        PDDocument doc3 = new PDDocument();
-        doc3.addPage(new PDPage());
-        doc3.addPage(new PDPage());
-        assertTrue(PdfUtils.pageCount(doc3, 5, "less"));
-
-        PDDocument doc4 = new PDDocument();
-        doc4.addPage(new PDPage());
-        assertThrows(IllegalArgumentException.class, () -> PdfUtils.pageCount(doc4, 1, "bad"));
+    void textToPageSize_invalidSize_throwsException() {
+        assertThrows(Exception.class, () -> PdfUtils.textToPageSize("INVALID"));
     }
 
     @Test
-    void testPageSize() throws Exception {
-        PDDocument doc = new PDDocument();
-        PDPage page = new PDPage(PDRectangle.A4);
-        doc.addPage(page);
-        PDRectangle rect = page.getMediaBox();
-        String expected = rect.getWidth() + "x" + rect.getHeight();
-        assertTrue(PdfUtils.pageSize(doc, expected));
+    void getAllImages_emptyResources_returnsEmptyList() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            page.setResources(new PDResources());
+            doc.addPage(page);
+            List<RenderedImage> images = PdfUtils.getAllImages(page.getResources());
+            assertTrue(images.isEmpty());
+        }
     }
 
     @Test
-    void testOverlayImage() throws Exception {
-        PDDocument doc = new PDDocument();
-        doc.addPage(new PDPage(PDRectangle.A4));
-        ByteArrayOutputStream pdfOut = new ByteArrayOutputStream();
-        doc.save(pdfOut);
-        doc.close();
+    void getAllImages_withImage_returnsImage() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
 
-        BufferedImage image = new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = image.createGraphics();
-        g.setColor(Color.RED);
-        g.fillRect(0, 0, 10, 10);
-        g.dispose();
-        ByteArrayOutputStream imgOut = new ByteArrayOutputStream();
-        javax.imageio.ImageIO.write(image, "png", imgOut);
+            BufferedImage bufferedImage = new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB);
+            PDImageXObject pdImage = LosslessFactory.createFromImage(doc, bufferedImage);
 
-        PdfMetadataService meta =
-                new PdfMetadataService(new ApplicationProperties(), "label", false, null);
-        CustomPDFDocumentFactory factory = new CustomPDFDocumentFactory(meta);
+            PDResources resources = new PDResources();
+            resources.add(pdImage);
+            page.setResources(resources);
 
-        byte[] result =
-                PdfUtils.overlayImage(
-                        factory, pdfOut.toByteArray(), imgOut.toByteArray(), 0, 0, false);
-        try (PDDocument resultDoc = factory.load(result)) {
-            assertEquals(1, resultDoc.getNumberOfPages());
+            List<RenderedImage> images = PdfUtils.getAllImages(page.getResources());
+            assertEquals(1, images.size());
+        }
+    }
+
+    @Test
+    void hasImagesOnPage_noImages_returnsFalse() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            page.setResources(new PDResources());
+            doc.addPage(page);
+            assertFalse(PdfUtils.hasImagesOnPage(page));
+        }
+    }
+
+    @Test
+    void hasTextOnPage_noText_returnsFalse() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            assertFalse(PdfUtils.hasTextOnPage(page, "hello"));
+        }
+    }
+
+    @Test
+    void pageCount_greaterComparator_correct() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            assertTrue(PdfUtils.pageCount(doc, 2, "greater"));
+        }
+    }
+
+    @Test
+    void pageCount_equalComparator_correct() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            assertTrue(PdfUtils.pageCount(doc, 2, "equal"));
+        }
+    }
+
+    @Test
+    void pageCount_lessComparator_correct() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            assertTrue(PdfUtils.pageCount(doc, 5, "less"));
+        }
+    }
+
+    @Test
+    void pageCount_invalidComparator_throwsException() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            assertThrows(Exception.class, () -> PdfUtils.pageCount(doc, 1, "invalid"));
+        }
+    }
+
+    @Test
+    void pageSize_matchingSize_returnsTrue() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage(PDRectangle.A4);
+            doc.addPage(page);
+            String sizeStr = PDRectangle.A4.getWidth() + "x" + PDRectangle.A4.getHeight();
+            assertTrue(PdfUtils.pageSize(doc, sizeStr));
+        }
+    }
+
+    @Test
+    void pageSize_nonMatchingSize_returnsFalse() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage(PDRectangle.A4);
+            doc.addPage(page);
+            assertFalse(PdfUtils.pageSize(doc, "100x100"));
+        }
+    }
+
+    // --- hasImages ---
+
+    @Test
+    void hasImages_noImages_returnsFalse() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            page.setResources(new PDResources());
+            doc.addPage(page);
+            assertFalse(PdfUtils.hasImages(doc, "all"));
+        }
+    }
+
+    @Test
+    void hasImages_withImage_returnsTrue() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+
+            BufferedImage bufferedImage = new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB);
+            PDImageXObject pdImage = LosslessFactory.createFromImage(doc, bufferedImage);
+            PDResources resources = new PDResources();
+            resources.add(pdImage);
+            page.setResources(resources);
+
+            assertTrue(PdfUtils.hasImages(doc, "all"));
+        }
+    }
+
+    // --- hasText ---
+
+    @Test
+    void hasText_noText_returnsFalse() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            assertFalse(PdfUtils.hasText(doc, "all", "hello"));
+        }
+    }
+
+    // --- textToPageSize additional ---
+
+    @Test
+    void textToPageSize_letter_returnsLetter() {
+        PDRectangle result = PdfUtils.textToPageSize("letter");
+        assertEquals(PDRectangle.LETTER.getWidth(), result.getWidth(), 0.01f);
+        assertEquals(PDRectangle.LETTER.getHeight(), result.getHeight(), 0.01f);
+    }
+
+    @Test
+    void textToPageSize_legal_returnsLegal() {
+        PDRectangle result = PdfUtils.textToPageSize("legal");
+        assertEquals(PDRectangle.LEGAL.getWidth(), result.getWidth(), 0.01f);
+        assertEquals(PDRectangle.LEGAL.getHeight(), result.getHeight(), 0.01f);
+    }
+
+    // --- pageCount additional ---
+
+    @Test
+    void pageCount_greaterComparator_false() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            assertFalse(PdfUtils.pageCount(doc, 5, "greater"));
+        }
+    }
+
+    @Test
+    void pageCount_equalComparator_false() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            assertFalse(PdfUtils.pageCount(doc, 3, "equal"));
+        }
+    }
+
+    @Test
+    void pageCount_lessComparator_false() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            doc.addPage(new PDPage());
+            assertFalse(PdfUtils.pageCount(doc, 2, "less"));
+        }
+    }
+
+    // --- hasImagesOnPage with image ---
+
+    @Test
+    void hasImagesOnPage_withImage_returnsTrue() throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+
+            BufferedImage bufferedImage = new BufferedImage(5, 5, BufferedImage.TYPE_INT_RGB);
+            PDImageXObject pdImage = LosslessFactory.createFromImage(doc, bufferedImage);
+            PDResources resources = new PDResources();
+            resources.add(pdImage);
+            page.setResources(resources);
+
+            assertTrue(PdfUtils.hasImagesOnPage(page));
         }
     }
 }

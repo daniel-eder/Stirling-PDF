@@ -3,71 +3,86 @@ package stirling.software.SPDF.controller.api;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageTree;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import stirling.software.SPDF.config.swagger.StandardPdfResponse;
 import stirling.software.SPDF.model.SortTypes;
 import stirling.software.SPDF.model.api.PDFWithPageNums;
 import stirling.software.SPDF.model.api.general.RearrangePagesRequest;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.GeneralApi;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.ExceptionUtils;
+import stirling.software.common.util.FormUtils;
 import stirling.software.common.util.GeneralUtils;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
-@RestController
-@RequestMapping("/api/v1/general")
+@GeneralApi
 @Slf4j
-@Tag(name = "General", description = "General APIs")
 @RequiredArgsConstructor
 public class RearrangePagesPDFController {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final TempFileManager tempFileManager;
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/remove-pages")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/remove-pages",
+            resourceWeight = ResourceWeight.SMALL_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Remove pages from a PDF file",
             description =
                     "This endpoint removes specified pages from a given PDF file. Users can provide"
                             + " a comma-separated list of page numbers or ranges to delete. Input:PDF"
                             + " Output:PDF Type:SISO")
-    public ResponseEntity<byte[]> deletePages(@ModelAttribute PDFWithPageNums request)
+    public ResponseEntity<Resource> deletePages(@ModelAttribute PDFWithPageNums request)
             throws IOException {
 
         MultipartFile pdfFile = request.getFileInput();
         String pagesToDelete = request.getPageNumbers();
 
-        PDDocument document = pdfDocumentFactory.load(pdfFile);
+        try (PDDocument document = pdfDocumentFactory.load(pdfFile)) {
 
-        // Split the page order string into an array of page numbers or range of numbers
-        String[] pageOrderArr = pagesToDelete.split(",");
+            // Split the page order string into an array of page numbers or range of numbers
+            String[] pageOrderArr = pagesToDelete.split(",");
 
-        List<Integer> pagesToRemove =
-                GeneralUtils.parsePageList(pageOrderArr, document.getNumberOfPages(), false);
+            List<Integer> pagesToRemove =
+                    GeneralUtils.parsePageList(pageOrderArr, document.getNumberOfPages(), false);
 
-        Collections.sort(pagesToRemove);
+            Collections.sort(pagesToRemove);
 
-        for (int i = pagesToRemove.size() - 1; i >= 0; i--) {
-            int pageIndex = pagesToRemove.get(i);
-            document.removePage(pageIndex);
+            for (int i = pagesToRemove.size() - 1; i >= 0; i--) {
+                int pageIndex = pagesToRemove.get(i);
+                document.removePage(pageIndex);
+            }
+            FormUtils.pruneOrphanedFormFields(document);
+            return WebResponseUtils.pdfDocToWebResponse(
+                    document,
+                    GeneralUtils.generateFilename(
+                            pdfFile.getOriginalFilename(), "_removed_pages.pdf"),
+                    tempFileManager);
         }
-        return WebResponseUtils.pdfDocToWebResponse(
-                document,
-                GeneralUtils.generateFilename(pdfFile.getOriginalFilename(), "_removed_pages.pdf"));
     }
 
     private List<Integer> removeFirst(int totalPages) {
@@ -149,28 +164,6 @@ public class RearrangePagesPDFController {
         return newPageOrder;
     }
 
-    /**
-     * Rearrange pages in a PDF file by merging odd and even pages. The first half of the pages will
-     * be the odd pages, and the second half will be the even pages as input. <br>
-     * This method is visible for testing purposes only.
-     *
-     * @param totalPages Total number of pages in the PDF file.
-     * @return List of page numbers in the new order. The first page is 0.
-     */
-    List<Integer> oddEvenMerge(int totalPages) {
-        List<Integer> newPageOrderZeroBased = new ArrayList<>();
-        int numberOfOddPages = (totalPages + 1) / 2;
-
-        for (int oneBasedIndex = 1; oneBasedIndex < (numberOfOddPages + 1); oneBasedIndex++) {
-            newPageOrderZeroBased.add((oneBasedIndex - 1));
-            if (numberOfOddPages + oneBasedIndex <= totalPages) {
-                newPageOrderZeroBased.add((numberOfOddPages + oneBasedIndex - 1));
-            }
-        }
-
-        return newPageOrderZeroBased;
-    }
-
     private List<Integer> duplicate(int totalPages, String pageOrder) {
         List<Integer> newPageOrder = new ArrayList<>();
         int duplicateCount;
@@ -190,6 +183,14 @@ public class RearrangePagesPDFController {
         if (duplicateCount < 1) {
             duplicateCount = 2; // Default to 2 if invalid input
         }
+        int maxDuplicateCount = Math.max(100, totalPages * 3);
+        if (duplicateCount > maxDuplicateCount) {
+            throw ExceptionUtils.createIllegalArgumentException(
+                    "error.invalidFormat",
+                    "Invalid {0} format: {1}",
+                    "duplicateCount",
+                    "must not exceed " + maxDuplicateCount);
+        }
 
         // For each page in the document
         for (int pageNum = 0; pageNum < totalPages; pageNum++) {
@@ -204,19 +205,23 @@ public class RearrangePagesPDFController {
 
     private List<Integer> processSortTypes(String sortTypes, int totalPages, String pageOrder) {
         try {
-            SortTypes mode = SortTypes.valueOf(sortTypes.toUpperCase());
+            SortTypes mode = SortTypes.valueOf(sortTypes.toUpperCase(Locale.ROOT));
             return switch (mode) {
                 case REVERSE_ORDER -> reverseOrder(totalPages);
                 case DUPLEX_SORT -> duplexSort(totalPages);
                 case BOOKLET_SORT -> bookletSort(totalPages);
                 case SIDE_STITCH_BOOKLET_SORT -> sideStitchBooklet(totalPages);
                 case ODD_EVEN_SPLIT -> oddEvenSplit(totalPages);
-                case ODD_EVEN_MERGE -> oddEvenMerge(totalPages);
                 case REMOVE_FIRST -> removeFirst(totalPages);
                 case REMOVE_LAST -> removeLast(totalPages);
                 case REMOVE_FIRST_AND_LAST -> removeFirstAndLast(totalPages);
                 case DUPLICATE -> duplicate(totalPages, pageOrder);
-                default -> throw new IllegalArgumentException("Unsupported custom mode");
+                default ->
+                        throw ExceptionUtils.createIllegalArgumentException(
+                                "error.invalidFormat",
+                                "Invalid {0} format: {1}",
+                                "custom mode",
+                                "unsupported");
             };
         } catch (IllegalArgumentException e) {
             log.error("Unsupported custom mode", e);
@@ -224,7 +229,11 @@ public class RearrangePagesPDFController {
         }
     }
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/rearrange-pages")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/rearrange-pages",
+            resourceWeight = ResourceWeight.SMALL_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Rearrange pages in a PDF file",
             description =
@@ -232,47 +241,63 @@ public class RearrangePagesPDFController {
                             + " order or custom mode. Users can provide a page order as a"
                             + " comma-separated list of page numbers or page ranges, or a custom mode."
                             + " Input:PDF Output:PDF")
-    public ResponseEntity<byte[]> rearrangePages(@ModelAttribute RearrangePagesRequest request)
+    public ResponseEntity<Resource> rearrangePages(@ModelAttribute RearrangePagesRequest request)
             throws IOException {
         MultipartFile pdfFile = request.getFileInput();
         String pageOrder = request.getPageNumbers();
         String sortType = request.getCustomMode();
         try {
-            // Load the input PDF
-            PDDocument document = pdfDocumentFactory.load(pdfFile);
+            // Load the input PDF with proper resource management
+            try (PDDocument document = pdfDocumentFactory.load(pdfFile)) {
 
-            // Split the page order string into an array of page numbers or range of numbers
-            String[] pageOrderArr = pageOrder != null ? pageOrder.split(",") : new String[0];
-            int totalPages = document.getNumberOfPages();
-            List<Integer> newPageOrder;
-            if (sortType != null
-                    && !sortType.isEmpty()
-                    && !"custom".equals(sortType.toLowerCase())) {
-                newPageOrder = processSortTypes(sortType, totalPages, pageOrder);
-            } else {
-                newPageOrder = GeneralUtils.parsePageList(pageOrderArr, totalPages, false);
+                // Split the page order string into an array of page numbers or range of numbers
+                String[] pageOrderArr = pageOrder != null ? pageOrder.split(",") : new String[0];
+                int totalPages = document.getNumberOfPages();
+                List<Integer> newPageOrder;
+                if (sortType != null
+                        && !sortType.isEmpty()
+                        && !"custom".equals(sortType.toLowerCase(Locale.ROOT))) {
+                    newPageOrder = processSortTypes(sortType, totalPages, pageOrder);
+                } else {
+                    newPageOrder = GeneralUtils.parsePageList(pageOrderArr, totalPages, false);
+                }
+                log.info("newPageOrder = {}", newPageOrder);
+                log.info("totalPages = {}", totalPages);
+
+                // Snapshot desired pages before mutating the tree; clone repeats (e.g. DUPLICATE)
+                // so each slot is a distinct node, not one PDPage under multiple /Kids.
+                List<PDPage> newPages = new ArrayList<>(newPageOrder.size());
+                Set<Integer> seenIndices = new HashSet<>();
+                for (Integer idx : newPageOrder) {
+                    PDPage page = document.getPage(idx);
+                    if (!seenIndices.add(idx)) {
+                        // Duplicate index: distinct page node sharing content/resources.
+                        COSDictionary clonedDict = new COSDictionary();
+                        clonedDict.addAll(page.getCOSObject());
+                        page = new PDPage(clonedDict);
+                    }
+                    newPages.add(page);
+                }
+
+                // Rearrange in-place on the source document rather than copying pages into a
+                // freshly-created PDDocument. Copying pages across documents triggers a PDFBox
+                // 3.0.7 compressed-save regression (PDFBOX-6203, fixed for 3.0.8) where shared
+                // resource objects (fonts, etc.) imported from the source can be silently
+                // dropped from the output, producing pages with "font not found" errors.
+                PDPageTree pages = document.getPages();
+                for (int i = totalPages - 1; i >= 0; i--) {
+                    pages.remove(i);
+                }
+                for (PDPage page : newPages) {
+                    pages.add(page);
+                }
+
+                return WebResponseUtils.pdfDocToWebResponse(
+                        document,
+                        GeneralUtils.generateFilename(
+                                pdfFile.getOriginalFilename(), "_rearranged.pdf"),
+                        tempFileManager);
             }
-            log.info("newPageOrder = {}", newPageOrder);
-            log.info("totalPages = {}", totalPages);
-            // Create a new list to hold the pages in the new order
-            List<PDPage> newPages = new ArrayList<>();
-            for (int i = 0; i < newPageOrder.size(); i++) {
-                newPages.add(document.getPage(newPageOrder.get(i)));
-            }
-
-            // Create a new document based on the original one
-            PDDocument rearrangedDocument =
-                    pdfDocumentFactory.createNewDocumentBasedOnOldDocument(document);
-
-            // Add the pages in the new order
-            for (PDPage page : newPages) {
-                rearrangedDocument.addPage(page);
-            }
-
-            return WebResponseUtils.pdfDocToWebResponse(
-                    rearrangedDocument,
-                    GeneralUtils.generateFilename(
-                            pdfFile.getOriginalFilename(), "_rearranged.pdf"));
         } catch (IOException e) {
             ExceptionUtils.logException("document rearrangement", e);
             throw e;

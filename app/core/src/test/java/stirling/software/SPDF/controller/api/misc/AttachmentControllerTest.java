@@ -1,9 +1,12 @@
 package stirling.software.SPDF.controller.api.misc;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
+import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.List;
 
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -14,6 +17,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,14 +28,28 @@ import org.springframework.web.multipart.MultipartFile;
 import stirling.software.SPDF.model.api.misc.AddAttachmentRequest;
 import stirling.software.SPDF.service.AttachmentServiceInterface;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.util.TempFile;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
 @ExtendWith(MockitoExtension.class)
 class AttachmentControllerTest {
+    private static ResponseEntity<Resource> streamingOk(byte[] bytes) {
+        return ResponseEntity.ok(new ByteArrayResource(bytes));
+    }
+
+    private static byte[] drainBody(ResponseEntity<Resource> response) throws java.io.IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try (java.io.InputStream __in = response.getBody().getInputStream()) {
+            __in.transferTo(baos);
+        }
+        return baos.toByteArray();
+    }
 
     @Mock private CustomPDFDocumentFactory pdfDocumentFactory;
 
     @Mock private AttachmentServiceInterface pdfAttachmentService;
+    @Mock private TempFileManager tempFileManager;
 
     @InjectMocks private AttachmentController attachmentController;
 
@@ -42,7 +61,19 @@ class AttachmentControllerTest {
     private PDDocument modifiedMockDocument;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        lenient()
+                .when(tempFileManager.createManagedTempFile(anyString()))
+                .thenAnswer(
+                        inv -> {
+                            File f =
+                                    Files.createTempFile("test", inv.<String>getArgument(0))
+                                            .toFile();
+                            TempFile tf = mock(TempFile.class);
+                            lenient().when(tf.getFile()).thenReturn(f);
+                            lenient().when(tf.getPath()).thenReturn(f.toPath());
+                            return tf;
+                        });
         pdfFile =
                 new MockMultipartFile(
                         "fileInput",
@@ -67,16 +98,15 @@ class AttachmentControllerTest {
     }
 
     @Test
-    void addAttachments_Success() throws IOException {
+    void addAttachments_Success() throws Exception {
         List<MultipartFile> attachments = List.of(attachment1, attachment2);
         request.setAttachments(attachments);
         request.setFileInput(pdfFile);
-        ResponseEntity<byte[]> expectedResponse =
-                ResponseEntity.ok("modified PDF content".getBytes());
+        ResponseEntity<Resource> expectedResponse = streamingOk("modified PDF content".getBytes());
 
-        when(pdfDocumentFactory.load(pdfFile, false)).thenReturn(mockDocument);
+        when(pdfDocumentFactory.load(request, false)).thenReturn(mockDocument);
         when(pdfAttachmentService.addAttachment(mockDocument, attachments))
-                .thenReturn(modifiedMockDocument);
+                .thenReturn(mockDocument);
 
         try (MockedStatic<WebResponseUtils> mockedWebResponseUtils =
                 mockStatic(WebResponseUtils.class)) {
@@ -84,31 +114,31 @@ class AttachmentControllerTest {
                     .when(
                             () ->
                                     WebResponseUtils.pdfDocToWebResponse(
-                                            eq(modifiedMockDocument),
-                                            eq("test_with_attachments.pdf")))
+                                            any(PDDocument.class),
+                                            anyString(),
+                                            any(TempFileManager.class)))
                     .thenReturn(expectedResponse);
 
-            ResponseEntity<byte[]> response = attachmentController.addAttachments(request);
+            ResponseEntity<Resource> response = attachmentController.addAttachments(request);
 
             assertNotNull(response);
             assertEquals(HttpStatus.OK, response.getStatusCode());
             assertNotNull(response.getBody());
-            verify(pdfDocumentFactory).load(pdfFile, false);
+            verify(pdfDocumentFactory).load(request, false);
             verify(pdfAttachmentService).addAttachment(mockDocument, attachments);
         }
     }
 
     @Test
-    void addAttachments_SingleAttachment() throws IOException {
+    void addAttachments_SingleAttachment() throws Exception {
         List<MultipartFile> attachments = List.of(attachment1);
         request.setAttachments(attachments);
         request.setFileInput(pdfFile);
-        ResponseEntity<byte[]> expectedResponse =
-                ResponseEntity.ok("modified PDF content".getBytes());
+        ResponseEntity<Resource> expectedResponse = streamingOk("modified PDF content".getBytes());
 
-        when(pdfDocumentFactory.load(pdfFile, false)).thenReturn(mockDocument);
+        when(pdfDocumentFactory.load(request, false)).thenReturn(mockDocument);
         when(pdfAttachmentService.addAttachment(mockDocument, attachments))
-                .thenReturn(modifiedMockDocument);
+                .thenReturn(mockDocument);
 
         try (MockedStatic<WebResponseUtils> mockedWebResponseUtils =
                 mockStatic(WebResponseUtils.class)) {
@@ -116,42 +146,43 @@ class AttachmentControllerTest {
                     .when(
                             () ->
                                     WebResponseUtils.pdfDocToWebResponse(
-                                            eq(modifiedMockDocument),
-                                            eq("test_with_attachments.pdf")))
+                                            any(PDDocument.class),
+                                            anyString(),
+                                            any(TempFileManager.class)))
                     .thenReturn(expectedResponse);
 
-            ResponseEntity<byte[]> response = attachmentController.addAttachments(request);
+            ResponseEntity<Resource> response = attachmentController.addAttachments(request);
 
             assertNotNull(response);
             assertEquals(HttpStatus.OK, response.getStatusCode());
             assertNotNull(response.getBody());
-            verify(pdfDocumentFactory).load(pdfFile, false);
+            verify(pdfDocumentFactory).load(request, false);
             verify(pdfAttachmentService).addAttachment(mockDocument, attachments);
         }
     }
 
     @Test
-    void addAttachments_IOExceptionFromPDFLoad() throws IOException {
+    void addAttachments_IOExceptionFromPDFLoad() throws Exception {
         List<MultipartFile> attachments = List.of(attachment1);
         request.setAttachments(attachments);
         request.setFileInput(pdfFile);
         IOException ioException = new IOException("Failed to load PDF");
 
-        when(pdfDocumentFactory.load(pdfFile, false)).thenThrow(ioException);
+        when(pdfDocumentFactory.load(request, false)).thenThrow(ioException);
 
         assertThrows(IOException.class, () -> attachmentController.addAttachments(request));
-        verify(pdfDocumentFactory).load(pdfFile, false);
+        verify(pdfDocumentFactory).load(request, false);
         verifyNoInteractions(pdfAttachmentService);
     }
 
     @Test
-    void addAttachments_IOExceptionFromAttachmentService() throws IOException {
+    void addAttachments_IOExceptionFromAttachmentService() throws Exception {
         List<MultipartFile> attachments = List.of(attachment1);
         request.setAttachments(attachments);
         request.setFileInput(pdfFile);
         IOException ioException = new IOException("Failed to add attachment");
 
-        when(pdfDocumentFactory.load(pdfFile, false)).thenReturn(mockDocument);
+        when(pdfDocumentFactory.load(request, false)).thenReturn(mockDocument);
         when(pdfAttachmentService.addAttachment(mockDocument, attachments)).thenThrow(ioException);
 
         assertThrows(IOException.class, () -> attachmentController.addAttachments(request));

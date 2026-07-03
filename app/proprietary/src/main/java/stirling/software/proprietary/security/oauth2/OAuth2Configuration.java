@@ -7,10 +7,10 @@ import static stirling.software.common.util.ValidationUtils.isStringEmpty;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
 
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -41,7 +41,7 @@ import stirling.software.proprietary.security.service.UserService;
 
 @Slf4j
 @Configuration
-@ConditionalOnBooleanProperty("security.oauth2.enabled")
+@ConditionalOnProperty(prefix = "security", name = "oauth2.enabled", havingValue = "true")
 public class OAuth2Configuration {
 
     public static final String REDIRECT_URI_PATH = "{baseUrl}/login/oauth2/code/";
@@ -53,6 +53,9 @@ public class OAuth2Configuration {
             ApplicationProperties applicationProperties, @Lazy UserService userService) {
         this.userService = userService;
         this.applicationProperties = applicationProperties;
+        log.info(
+                "OAuth2Configuration initialized - OAuth2 enabled: {}",
+                applicationProperties.getSecurity().getOauth2().getEnabled());
     }
 
     @Bean
@@ -65,9 +68,14 @@ public class OAuth2Configuration {
         keycloakClientRegistration().ifPresent(registrations::add);
 
         if (registrations.isEmpty()) {
-            log.error("No OAuth2 provider registered");
+            log.error("No OAuth2 provider registered - check your OAuth2 configuration");
             throw new NoProviderFoundException("At least one OAuth2 provider must be configured.");
         }
+
+        log.info(
+                "OAuth2 ClientRegistrationRepository created with {} provider(s): {}",
+                registrations.size(),
+                registrations.stream().map(ClientRegistration::getRegistrationId).toList());
 
         return new InMemoryClientRegistrationRepository(registrations);
     }
@@ -75,7 +83,7 @@ public class OAuth2Configuration {
     private Optional<ClientRegistration> keycloakClientRegistration() {
         OAUTH2 oauth2 = applicationProperties.getSecurity().getOauth2();
 
-        if (isOAuth2Enabled(oauth2) || isClientInitialised(oauth2)) {
+        if (isOAuth2Disabled(oauth2) || isClientInitialised(oauth2)) {
             return Optional.empty();
         }
 
@@ -105,7 +113,7 @@ public class OAuth2Configuration {
     private Optional<ClientRegistration> googleClientRegistration() {
         OAUTH2 oAuth2 = applicationProperties.getSecurity().getOauth2();
 
-        if (isOAuth2Enabled(oAuth2) || isClientInitialised(oAuth2)) {
+        if (isOAuth2Disabled(oAuth2) || isClientInitialised(oAuth2)) {
             return Optional.empty();
         }
 
@@ -138,12 +146,23 @@ public class OAuth2Configuration {
     private Optional<ClientRegistration> githubClientRegistration() {
         OAUTH2 oAuth2 = applicationProperties.getSecurity().getOauth2();
 
-        if (isOAuth2Enabled(oAuth2)) {
+        if (isOAuth2Disabled(oAuth2)) {
+            log.debug("OAuth2 is disabled, skipping GitHub client registration");
             return Optional.empty();
         }
 
         Client client = oAuth2.getClient();
+        if (client == null) {
+            log.debug("OAuth2 client configuration is null, skipping GitHub");
+            return Optional.empty();
+        }
+
         GitHubProvider githubClient = client.getGithub();
+        if (githubClient == null) {
+            log.debug("GitHub client configuration is null");
+            return Optional.empty();
+        }
+
         Provider github =
                 new GitHubProvider(
                         githubClient.getClientId(),
@@ -151,7 +170,9 @@ public class OAuth2Configuration {
                         githubClient.getScopes(),
                         githubClient.getUseAsUsername());
 
-        return validateProvider(github)
+        boolean isValid = validateProvider(github);
+
+        return isValid
                 ? Optional.of(
                         ClientRegistration.withRegistrationId(github.getName())
                                 .clientId(github.getClientId())
@@ -171,13 +192,13 @@ public class OAuth2Configuration {
     private Optional<ClientRegistration> oidcClientRegistration() {
         OAUTH2 oauth = applicationProperties.getSecurity().getOauth2();
 
-        if (isOAuth2Enabled(oauth) || isClientInitialised(oauth)) {
+        if (isOAuth2Disabled(oauth) || isClientInitialised(oauth)) {
             return Optional.empty();
         }
 
         String name = oauth.getProvider();
         String firstChar = String.valueOf(name.charAt(0));
-        String clientName = name.replaceFirst(firstChar, firstChar.toUpperCase());
+        String clientName = name.replaceFirst(firstChar, firstChar.toUpperCase(Locale.ROOT));
 
         Provider oidcProvider =
                 new Provider(
@@ -187,12 +208,25 @@ public class OAuth2Configuration {
                         oauth.getClientId(),
                         oauth.getClientSecret(),
                         oauth.getScopes(),
-                        UsernameAttribute.valueOf(oauth.getUseAsUsername().toUpperCase()),
+                        UsernameAttribute.valueOf(
+                                oauth.getUseAsUsername().toUpperCase(Locale.ROOT)),
                         null,
                         null,
                         null);
 
-        return !isStringEmpty(oidcProvider.getIssuer()) || validateProvider(oidcProvider)
+        boolean isValid =
+                !isStringEmpty(oidcProvider.getIssuer()) || validateProvider(oidcProvider);
+        if (isValid) {
+            log.info(
+                    "Initialised OIDC OAuth2 provider: registrationId='{}', issuer='{}', redirectUri='{}'",
+                    name,
+                    oauth.getIssuer(),
+                    REDIRECT_URI_PATH + name);
+        } else {
+            log.warn("OIDC OAuth2 provider validation failed - provider will not be registered");
+        }
+
+        return isValid
                 ? Optional.of(
                         ClientRegistrations.fromIssuerLocation(oauth.getIssuer())
                                 .registrationId(name)
@@ -201,13 +235,13 @@ public class OAuth2Configuration {
                                 .scope(oidcProvider.getScopes())
                                 .userNameAttributeName(oidcProvider.getUseAsUsername().getName())
                                 .clientName(clientName)
-                                .redirectUri(REDIRECT_URI_PATH + "oidc")
+                                .redirectUri(REDIRECT_URI_PATH + name)
                                 .authorizationGrantType(AUTHORIZATION_CODE)
                                 .build())
                 : Optional.empty();
     }
 
-    private boolean isOAuth2Enabled(OAUTH2 oAuth2) {
+    private boolean isOAuth2Disabled(OAUTH2 oAuth2) {
         return oAuth2 == null || !oAuth2.getEnabled();
     }
 

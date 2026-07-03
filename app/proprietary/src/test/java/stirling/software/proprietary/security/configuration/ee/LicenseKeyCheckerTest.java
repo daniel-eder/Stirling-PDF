@@ -1,5 +1,7 @@
 package stirling.software.proprietary.security.configuration.ee;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -17,11 +19,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import stirling.software.common.model.ApplicationProperties;
+import stirling.software.proprietary.service.UserLicenseSettingsService;
 
 @ExtendWith(MockitoExtension.class)
 class LicenseKeyCheckerTest {
 
     @Mock private KeygenLicenseVerifier verifier;
+    @Mock private UserLicenseSettingsService userLicenseSettingsService;
 
     @Test
     void premiumDisabled_skipsVerification() {
@@ -29,7 +33,9 @@ class LicenseKeyCheckerTest {
         props.getPremium().setEnabled(false);
         props.getPremium().setKey("dummy");
 
-        LicenseKeyChecker checker = new LicenseKeyChecker(verifier, props);
+        LicenseKeyChecker checker =
+                new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
+        checker.init();
 
         assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
         verifyNoInteractions(verifier);
@@ -40,11 +46,13 @@ class LicenseKeyCheckerTest {
         ApplicationProperties props = new ApplicationProperties();
         props.getPremium().setEnabled(true);
         props.getPremium().setKey("abc");
-        when(verifier.verifyLicense("abc")).thenReturn(License.PRO);
+        when(verifier.verifyLicense("abc")).thenReturn(License.SERVER);
 
-        LicenseKeyChecker checker = new LicenseKeyChecker(verifier, props);
+        LicenseKeyChecker checker =
+                new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
+        checker.init();
 
-        assertEquals(License.PRO, checker.getPremiumLicenseEnabledResult());
+        assertEquals(License.SERVER, checker.getPremiumLicenseEnabledResult());
         verify(verifier).verifyLicense("abc");
     }
 
@@ -55,10 +63,12 @@ class LicenseKeyCheckerTest {
 
         ApplicationProperties props = new ApplicationProperties();
         props.getPremium().setEnabled(true);
-        props.getPremium().setKey("file:" + file.toString());
+        props.getPremium().setKey("file:" + file);
         when(verifier.verifyLicense("filekey")).thenReturn(License.ENTERPRISE);
 
-        LicenseKeyChecker checker = new LicenseKeyChecker(verifier, props);
+        LicenseKeyChecker checker =
+                new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
+        checker.init();
 
         assertEquals(License.ENTERPRISE, checker.getPremiumLicenseEnabledResult());
         verify(verifier).verifyLicense("filekey");
@@ -69,11 +79,52 @@ class LicenseKeyCheckerTest {
         Path file = temp.resolve("missing.txt");
         ApplicationProperties props = new ApplicationProperties();
         props.getPremium().setEnabled(true);
-        props.getPremium().setKey("file:" + file.toString());
+        props.getPremium().setKey("file:" + file);
 
-        LicenseKeyChecker checker = new LicenseKeyChecker(verifier, props);
+        LicenseKeyChecker checker =
+                new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
+        checker.init();
 
         assertEquals(License.NORMAL, checker.getPremiumLicenseEnabledResult());
         verifyNoInteractions(verifier);
+    }
+
+    // ----- requireProOrEnterprise: shared boot-time gate for premium features -----
+
+    @Test
+    void requireProOrEnterprise_normalLicense_throwsWithFeatureName() {
+        LicenseKeyChecker checker = checkerWithLicense(License.NORMAL);
+        assertThatThrownBy(() -> checker.requireProOrEnterprise("storage.provider=s3"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("storage.provider=s3 requires a Pro or Enterprise license");
+    }
+
+    @Test
+    void requireProOrEnterprise_serverLicense_passes() {
+        LicenseKeyChecker checker = checkerWithLicense(License.SERVER);
+        assertThatCode(() -> checker.requireProOrEnterprise("any.feature=true"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    void requireProOrEnterprise_enterpriseLicense_passes() {
+        LicenseKeyChecker checker = checkerWithLicense(License.ENTERPRISE);
+        assertThatCode(() -> checker.requireProOrEnterprise("any.feature=true"))
+                .doesNotThrowAnyException();
+    }
+
+    private LicenseKeyChecker checkerWithLicense(License level) {
+        ApplicationProperties props = new ApplicationProperties();
+        if (level == License.NORMAL) {
+            props.getPremium().setEnabled(false);
+        } else {
+            props.getPremium().setEnabled(true);
+            props.getPremium().setKey("any");
+            when(verifier.verifyLicense("any")).thenReturn(level);
+        }
+        LicenseKeyChecker checker =
+                new LicenseKeyChecker(verifier, props, userLicenseSettingsService);
+        checker.init();
+        return checker;
     }
 }

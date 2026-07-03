@@ -2,46 +2,83 @@ package stirling.software.SPDF.model.api.converters;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.util.Set;
-
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import jakarta.validation.ConstraintViolation;
-import jakarta.validation.Validation;
-import jakarta.validation.Validator;
-import jakarta.validation.ValidatorFactory;
+@DisplayName("PdfVectorExportRequest")
+class PdfVectorExportRequestTest {
 
-public class PdfVectorExportRequestTest {
+    @Nested
+    @DisplayName("defaults")
+    class Defaults {
 
-    private static Validator validator;
+        @Test
+        @DisplayName("outputFormat defaults to eps and prepress to null")
+        void defaultValues() {
+            PdfVectorExportRequest req = new PdfVectorExportRequest();
 
-    @BeforeAll
-    static void setUpValidator() {
-        try (ValidatorFactory factory = Validation.buildDefaultValidatorFactory()) {
-            validator = factory.getValidator();
+            assertThat(req.getOutputFormat()).isEqualTo("eps");
+            assertThat(req.getPrepress()).isNull();
         }
     }
 
-    @Test
-    void whenOutputFormatValid_thenNoViolations() {
-        PdfVectorExportRequest request = new PdfVectorExportRequest();
-        request.setOutputFormat("EPS");
+    @Nested
+    @DisplayName("accessors")
+    class Accessors {
 
-        Set<ConstraintViolation<PdfVectorExportRequest>> violations = validator.validate(request);
+        @Test
+        @DisplayName("setters round trip every field")
+        void setters() {
+            PdfVectorExportRequest req = new PdfVectorExportRequest();
+            req.setOutputFormat("xps");
+            req.setPrepress(Boolean.TRUE);
 
-        assertThat(violations).isEmpty();
+            assertThat(req.getOutputFormat()).isEqualTo("xps");
+            assertThat(req.getPrepress()).isTrue();
+        }
     }
 
-    @Test
-    void whenOutputFormatInvalid_thenConstraintViolation() {
-        PdfVectorExportRequest request = new PdfVectorExportRequest();
-        request.setOutputFormat("svg");
+    @Nested
+    @DisplayName("equals/hashCode/toString")
+    class Equality {
 
-        Set<ConstraintViolation<PdfVectorExportRequest>> violations = validator.validate(request);
+        @Test
+        @DisplayName("fresh instances are equal despite callSuper")
+        void equalInstances() {
+            PdfVectorExportRequest a = new PdfVectorExportRequest();
+            PdfVectorExportRequest b = new PdfVectorExportRequest();
 
-        assertThat(violations).hasSize(1);
-        assertThat(violations.iterator().next().getPropertyPath().toString())
-                .isEqualTo("outputFormat");
+            assertThat(a).isEqualTo(b).hasSameHashCodeAs(b);
+        }
+
+        @Test
+        @DisplayName("differing outputFormat breaks equality")
+        void notEqualFormat() {
+            PdfVectorExportRequest a = new PdfVectorExportRequest();
+            PdfVectorExportRequest b = new PdfVectorExportRequest();
+            b.setOutputFormat("ps");
+
+            assertThat(a).isNotEqualTo(b).isNotEqualTo(null).isNotEqualTo("string");
+        }
+
+        @Test
+        @DisplayName("differing prepress breaks equality")
+        void notEqualPrepress() {
+            PdfVectorExportRequest a = new PdfVectorExportRequest();
+            PdfVectorExportRequest b = new PdfVectorExportRequest();
+            b.setPrepress(Boolean.TRUE);
+
+            assertThat(a).isNotEqualTo(b);
+        }
+
+        @Test
+        @DisplayName("toString contains a representative field value")
+        void toStringContent() {
+            PdfVectorExportRequest req = new PdfVectorExportRequest();
+            req.setOutputFormat("pcl");
+
+            assertThat(req.toString()).isNotNull().contains("outputFormat=pcl");
+        }
     }
 }

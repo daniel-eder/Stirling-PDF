@@ -45,6 +45,10 @@
       "moduleLicense": "The MIT License"
     },
     {
+      "moduleName": ".*",
+      "moduleLicense": "MIT-0"
+    },
+    {
       "moduleName": "com.github.jai-imageio:jai-imageio-core",
       "moduleLicense": "LICENSE.txt"
     },
@@ -95,6 +99,22 @@
     {
       "moduleName": ".*",
       "moduleLicense": "MPL 2.0"
+    },
+    {
+      "moduleName": ".*",
+      "moduleLicense": "Mozilla Public License, Version 2.0"
+    },
+    {
+      "moduleName": ".*",
+      "moduleLicense": "Mozilla Public License 2.0 (MPL-2.0)"
+    },
+    {
+      "moduleName": ".*",
+      "moduleLicense": 	"CDDL+GPL License"
+    },
+    {
+      "moduleName": ".*",
+      "moduleLicense": "BSD"
     },
     {
       "moduleName": ".*",

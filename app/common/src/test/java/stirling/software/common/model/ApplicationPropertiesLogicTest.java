@@ -2,7 +2,7 @@ package stirling.software.common.model;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.nio.file.Paths;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -32,24 +32,39 @@ class ApplicationPropertiesLogicTest {
     }
 
     @Test
+    void storageSigning_userListScope_defaultsToOrg_andIsSettable() {
+        // Self-host backward-compat: scope must default to "org" (saas profile pins "team").
+        ApplicationProperties.Storage.Signing signing = new ApplicationProperties.Storage.Signing();
+
+        assertFalse(signing.isEnabled());
+        assertEquals("org", signing.getUserListScope());
+
+        signing.setUserListScope("team");
+        assertEquals("team", signing.getUserListScope());
+
+        // Reachable from the full tree as storage.signing.userListScope.
+        assertEquals(
+                "org", new ApplicationProperties().getStorage().getSigning().getUserListScope());
+    }
+
+    @Test
     void tempFileManagement_defaults_and_overrides() {
-        Function<String, String> normalize = s -> Paths.get(s).normalize().toString();
+        Function<String, String> normalize = s -> Path.of(s).normalize().toString();
         ApplicationProperties.TempFileManagement tfm =
                 new ApplicationProperties.TempFileManagement();
 
         String expectedBase =
-                Paths.get(java.lang.System.getProperty("java.io.tmpdir"), "stirling-pdf")
-                        .toString();
+                Path.of(java.lang.System.getProperty("java.io.tmpdir"), "stirling-pdf").toString();
         assertEquals(expectedBase, tfm.getBaseTmpDir());
 
-        String expectedLibre = Paths.get(expectedBase, "libreoffice").toString();
+        String expectedLibre = Path.of(expectedBase, "libreoffice").toString();
         assertEquals(expectedLibre, tfm.getLibreofficeDir());
 
         tfm.setBaseTmpDir("/custom/base");
-        assertEquals("/custom/base", normalize.apply(tfm.getBaseTmpDir()));
+        assertEquals(normalize.apply("/custom/base"), normalize.apply(tfm.getBaseTmpDir()));
 
         tfm.setLibreofficeDir("/opt/libre");
-        assertEquals("/opt/libre", normalize.apply(tfm.getLibreofficeDir()));
+        assertEquals(normalize.apply("/opt/libre"), normalize.apply(tfm.getLibreofficeDir()));
     }
 
     @Test
@@ -113,37 +128,13 @@ class ApplicationPropertiesLogicTest {
     }
 
     @Test
-    void premium_google_drive_getters_return_empty_string_on_null_or_blank() {
-        Premium.ProFeatures.GoogleDrive gd = new Premium.ProFeatures.GoogleDrive();
-
-        assertEquals("", gd.getClientId());
-        assertEquals("", gd.getApiKey());
-        assertEquals("", gd.getAppId());
-
-        gd.setClientId(" id ");
-        gd.setApiKey(" key ");
-        gd.setAppId(" app ");
-        assertEquals(" id ", gd.getClientId());
-        assertEquals(" key ", gd.getApiKey());
-        assertEquals(" app ", gd.getAppId());
-    }
-
-    @Test
     void ui_getters_return_null_for_blank() {
         ApplicationProperties.Ui ui = new ApplicationProperties.Ui();
-        ui.setAppName("   ");
-        ui.setHomeDescription("");
         ui.setAppNameNavbar(null);
 
-        assertNull(ui.getAppName());
-        assertNull(ui.getHomeDescription());
         assertNull(ui.getAppNameNavbar());
 
-        ui.setAppName("Stirling-PDF");
-        ui.setHomeDescription("Home");
         ui.setAppNameNavbar("Nav");
-        assertEquals("Stirling-PDF", ui.getAppName());
-        assertEquals("Home", ui.getHomeDescription());
         assertEquals("Nav", ui.getAppNameNavbar());
     }
 

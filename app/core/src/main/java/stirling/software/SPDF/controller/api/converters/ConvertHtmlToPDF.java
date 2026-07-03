@@ -1,27 +1,28 @@
 package stirling.software.SPDF.controller.api.converters;
 
+import java.nio.file.Files;
+
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import io.github.pixee.security.Filenames;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 
+import stirling.software.SPDF.config.swagger.StandardPdfResponse;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.ConvertApi;
 import stirling.software.common.configuration.RuntimePathConfig;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.model.api.converters.HTMLToPdfRequest;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.*;
 
-@RestController
-@Tag(name = "Convert", description = "Convert APIs")
-@RequestMapping("/api/v1/convert")
+@ConvertApi
 @RequiredArgsConstructor
 public class ConvertHtmlToPDF {
 
@@ -33,13 +34,17 @@ public class ConvertHtmlToPDF {
 
     private final CustomHtmlSanitizer customHtmlSanitizer;
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/html/pdf")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/html/pdf",
+            resourceWeight = ResourceWeight.LARGE_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Convert an HTML or ZIP (containing HTML and CSS) to PDF",
             description =
                     "This endpoint takes an HTML or ZIP file input and converts it to a PDF format."
                             + " Input:HTML Output:PDF Type:SISO")
-    public ResponseEntity<byte[]> HtmlToPdf(@ModelAttribute HTMLToPdfRequest request)
+    public ResponseEntity<Resource> HtmlToPdf(@ModelAttribute HTMLToPdfRequest request)
             throws Exception {
         MultipartFile fileInput = request.getFileInput();
 
@@ -67,6 +72,13 @@ public class ConvertHtmlToPDF {
 
         String outputFilename = GeneralUtils.generateFilename(originalFilename, ".pdf");
 
-        return WebResponseUtils.bytesToWebResponse(pdfBytes, outputFilename);
+        TempFile tempOut = tempFileManager.createManagedTempFile(".pdf");
+        try {
+            Files.write(tempOut.getPath(), pdfBytes);
+        } catch (Exception e) {
+            tempOut.close();
+            throw e;
+        }
+        return WebResponseUtils.pdfFileToWebResponse(tempOut, outputFilename);
     }
 }

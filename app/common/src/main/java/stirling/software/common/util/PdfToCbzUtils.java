@@ -1,8 +1,9 @@
 package stirling.software.common.util;
 
 import java.awt.image.BufferedImage;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.util.Locale;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -21,69 +22,83 @@ import stirling.software.common.service.CustomPDFDocumentFactory;
 @Slf4j
 public class PdfToCbzUtils {
 
-    public static byte[] convertPdfToCbz(
-            MultipartFile pdfFile, int dpi, CustomPDFDocumentFactory pdfDocumentFactory)
+    public static TempFile convertPdfToCbz(
+            MultipartFile pdfFile,
+            int dpi,
+            CustomPDFDocumentFactory pdfDocumentFactory,
+            TempFileManager tempFileManager)
             throws IOException {
 
         validatePdfFile(pdfFile);
 
         try (PDDocument document = pdfDocumentFactory.load(pdfFile)) {
             if (document.getNumberOfPages() == 0) {
-                throw new IllegalArgumentException("PDF file contains no pages");
+                throw ExceptionUtils.createPdfNoPages();
             }
 
-            return createCbzFromPdf(document, dpi);
+            return createCbzFromPdf(document, dpi, tempFileManager);
         }
     }
 
     private static void validatePdfFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("File cannot be null or empty");
+            throw ExceptionUtils.createFileNullOrEmptyException();
         }
 
         String filename = file.getOriginalFilename();
         if (filename == null) {
-            throw new IllegalArgumentException("File must have a name");
+            throw ExceptionUtils.createFileNoNameException();
         }
 
-        String extension = FilenameUtils.getExtension(filename).toLowerCase();
+        String extension = FilenameUtils.getExtension(filename).toLowerCase(Locale.ROOT);
         if (!"pdf".equals(extension)) {
-            throw new IllegalArgumentException("File must be a PDF");
+            throw ExceptionUtils.createPdfFileRequiredException();
         }
     }
 
-    private static byte[] createCbzFromPdf(PDDocument document, int dpi) throws IOException {
+    private static TempFile createCbzFromPdf(
+            PDDocument document, int dpi, TempFileManager tempFileManager) throws IOException {
         PDFRenderer pdfRenderer = new PDFRenderer(document);
+        pdfRenderer.setSubsamplingAllowed(true); // Enable subsampling to reduce memory usage
 
-        try (ByteArrayOutputStream cbzOutputStream = new ByteArrayOutputStream();
-                ZipOutputStream zipOut = new ZipOutputStream(cbzOutputStream)) {
+        TempFile cbzTempFile = new TempFile(tempFileManager, ".cbz");
+        try {
+            try (ZipOutputStream zipOut =
+                    new ZipOutputStream(Files.newOutputStream(cbzTempFile.getPath()))) {
 
-            int totalPages = document.getNumberOfPages();
+                int totalPages = document.getNumberOfPages();
 
-            for (int pageIndex = 0; pageIndex < totalPages; pageIndex++) {
-                try {
-                    BufferedImage image =
-                            pdfRenderer.renderImageWithDPI(pageIndex, dpi, ImageType.RGB);
+                for (int pageIndex = 0; pageIndex < totalPages; pageIndex++) {
+                    final int currentPage = pageIndex;
+                    try {
+                        BufferedImage image =
+                                ExceptionUtils.handleOomRendering(
+                                        currentPage + 1,
+                                        dpi,
+                                        () ->
+                                                pdfRenderer.renderImageWithDPI(
+                                                        currentPage, dpi, ImageType.RGB));
 
-                    String imageFilename = String.format("page_%03d.png", pageIndex + 1);
+                        String imageFilename =
+                                String.format(Locale.ROOT, "page_%03d.png", currentPage + 1);
+                        zipOut.putNextEntry(new ZipEntry(imageFilename));
+                        ImageIO.write(image, "PNG", zipOut);
+                        zipOut.closeEntry();
 
-                    ZipEntry zipEntry = new ZipEntry(imageFilename);
-                    zipOut.putNextEntry(zipEntry);
-
-                    ImageIO.write(image, "PNG", zipOut);
-                    zipOut.closeEntry();
-
-                } catch (IOException e) {
-                    log.warn("Error processing page {}: {}", pageIndex + 1, e.getMessage());
-                } catch (OutOfMemoryError e) {
-                    throw ExceptionUtils.createOutOfMemoryDpiException(pageIndex + 1, dpi, e);
-                } catch (NegativeArraySizeException e) {
-                    throw ExceptionUtils.createOutOfMemoryDpiException(pageIndex + 1, dpi, e);
+                    } catch (ExceptionUtils.OutOfMemoryDpiException e) {
+                        // Re-throw OOM exceptions without wrapping
+                        throw e;
+                    } catch (IOException e) {
+                        // Wrap other IOExceptions with context
+                        throw ExceptionUtils.createFileProcessingException(
+                                "CBZ creation for page " + (currentPage + 1), e);
+                    }
                 }
             }
-
-            zipOut.finish();
-            return cbzOutputStream.toByteArray();
+            return cbzTempFile;
+        } catch (Exception e) {
+            cbzTempFile.close();
+            throw e;
         }
     }
 
@@ -93,7 +108,7 @@ public class PdfToCbzUtils {
             return false;
         }
 
-        String extension = FilenameUtils.getExtension(filename).toLowerCase();
+        String extension = FilenameUtils.getExtension(filename).toLowerCase(Locale.ROOT);
         return "pdf".equals(extension);
     }
 }

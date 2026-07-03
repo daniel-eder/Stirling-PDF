@@ -5,5 +5,11 @@ public interface UserServiceInterface {
 
     String getCurrentUsername();
 
+    String getCurrentUserApiKey();
+
     long getTotalUsersCount();
+
+    boolean isCurrentUserAdmin();
+
+    boolean isCurrentUserFirstLogin();
 }

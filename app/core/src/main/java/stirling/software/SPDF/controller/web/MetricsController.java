@@ -1,5 +1,7 @@
 package stirling.software.SPDF.controller.web;
 
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -7,15 +9,12 @@ import java.util.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import jakarta.annotation.PostConstruct;
 
@@ -26,11 +25,11 @@ import lombok.extern.slf4j.Slf4j;
 
 import stirling.software.SPDF.config.EndpointInspector;
 import stirling.software.SPDF.config.StartupApplicationListener;
+import stirling.software.SPDF.service.WeeklyActiveUsersService;
+import stirling.software.common.annotations.api.InfoApi;
 import stirling.software.common.model.ApplicationProperties;
 
-@RestController
-@RequestMapping("/api/v1/info")
-@Tag(name = "Info", description = "Info APIs")
+@InfoApi
 @Slf4j
 @RequiredArgsConstructor
 public class MetricsController {
@@ -38,13 +37,12 @@ public class MetricsController {
     private final ApplicationProperties applicationProperties;
     private final MeterRegistry meterRegistry;
     private final EndpointInspector endpointInspector;
+    private final Optional<WeeklyActiveUsersService> wauService;
     private boolean metricsEnabled;
 
     @PostConstruct
     public void init() {
-        Boolean metricsEnabled = applicationProperties.getMetrics().getEnabled();
-        if (metricsEnabled == null) metricsEnabled = true;
-        this.metricsEnabled = metricsEnabled;
+        metricsEnabled = applicationProperties.getMetrics().isEnabled();
     }
 
     @GetMapping("/status")
@@ -53,13 +51,40 @@ public class MetricsController {
             description =
                     "This endpoint returns the status of the application and its version number.")
     public ResponseEntity<?> getStatus() {
-        if (!metricsEnabled) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("This endpoint is disabled.");
-        }
+        return getApplicationStatus();
+    }
+
+    @GetMapping("/health")
+    @Operation(
+            summary = "Application health check",
+            description =
+                    "This endpoint returns the health status of the application and its version number. Mirrors /api/v1/info/status.")
+    public ResponseEntity<?> getHealth() {
+        return getApplicationStatus();
+    }
+
+    private ResponseEntity<?> getApplicationStatus() {
         Map<String, String> status = new HashMap<>();
         status.put("status", "UP");
-        status.put("version", getClass().getPackage().getImplementationVersion());
+        String version = getClass().getPackage().getImplementationVersion();
+        if (version == null) {
+            version = getVersionFromProperties();
+        }
+        status.put("version", version);
         return ResponseEntity.ok(status);
+    }
+
+    private String getVersionFromProperties() {
+        try (InputStream is = getClass().getResourceAsStream("/version.properties")) {
+            if (is != null) {
+                Properties props = new Properties();
+                props.load(is);
+                return props.getProperty("version");
+            }
+        } catch (IOException e) {
+            log.error("Failed to load version.properties", e);
+        }
+        return null;
     }
 
     @GetMapping("/load")
@@ -356,12 +381,42 @@ public class MetricsController {
         return ResponseEntity.ok(formatDuration(uptime));
     }
 
+    @GetMapping("/wau")
+    @Operation(
+            summary = "Weekly Active Users statistics",
+            description =
+                    "Returns WAU (Weekly Active Users) count and total unique browsers. "
+                            + "Only available when security is disabled (no-login mode). "
+                            + "Tracks unique browsers via client-generated UUID in localStorage.")
+    public ResponseEntity<?> getWeeklyActiveUsers() {
+        if (!metricsEnabled) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body("This endpoint is disabled.");
+        }
+
+        // Check if WAU service is available (only when security.enableLogin=false)
+        if (wauService.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(
+                            "WAU tracking is only available when security is disabled (no-login mode)");
+        }
+
+        WeeklyActiveUsersService service = wauService.get();
+
+        Map<String, Object> wauStats = new HashMap<>();
+        wauStats.put("weeklyActiveUsers", service.getWeeklyActiveUsers());
+        wauStats.put("totalUniqueBrowsers", service.getTotalUniqueBrowsers());
+        wauStats.put("daysOnline", service.getDaysOnline());
+        wauStats.put("trackingSince", service.getStartTime().toString());
+
+        return ResponseEntity.ok(wauStats);
+    }
+
     private String formatDuration(Duration duration) {
         long days = duration.toDays();
         long hours = duration.toHoursPart();
         long minutes = duration.toMinutesPart();
         long seconds = duration.toSecondsPart();
-        return String.format("%dd %dh %dm %ds", days, hours, minutes, seconds);
+        return String.format(Locale.ROOT, "%dd %dh %dm %ds", days, hours, minutes, seconds);
     }
 
     @Setter

@@ -1,12 +1,17 @@
 package stirling.software.SPDF.controller.api.security;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
+import java.nio.file.Files;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -17,19 +22,40 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import stirling.software.SPDF.model.api.security.SignPDFWithCertRequest;
+import stirling.software.SPDF.service.HardwareKeyStoreService;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.util.TempFile;
+import stirling.software.common.util.TempFileManager;
 
 @ExtendWith(MockitoExtension.class)
 class CertSignControllerTest {
+    private static ResponseEntity<Resource> streamingOk(byte[] bytes) {
+        return ResponseEntity.ok(new ByteArrayResource(bytes));
+    }
+
+    private static byte[] drainBody(ResponseEntity<Resource> response) throws java.io.IOException {
+        java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+        try (java.io.InputStream __in = response.getBody().getInputStream()) {
+            __in.transferTo(baos);
+        }
+        return baos.toByteArray();
+    }
 
     @Mock private CustomPDFDocumentFactory pdfDocumentFactory;
+    @Mock private TempFileManager tempFileManager;
+    @Mock private HardwareKeyStoreService hardwareKeyStoreService;
+    @Mock private HttpServletRequest httpRequest;
 
     @InjectMocks private CertSignController certSignController;
 
@@ -46,6 +72,18 @@ class CertSignControllerTest {
 
     @BeforeEach
     void setUp() throws Exception {
+        lenient()
+                .when(tempFileManager.createManagedTempFile(anyString()))
+                .thenAnswer(
+                        inv -> {
+                            File f =
+                                    Files.createTempFile("test", inv.<String>getArgument(0))
+                                            .toFile();
+                            TempFile tf = mock(TempFile.class);
+                            lenient().when(tf.getFile()).thenReturn(f);
+                            lenient().when(tf.getPath()).thenReturn(f.toPath());
+                            return tf;
+                        });
         try (PDDocument doc = new PDDocument()) {
             doc.addPage(new PDPage());
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -107,7 +145,8 @@ class CertSignControllerTest {
             derCertBytes = baos.toByteArray();
         }
 
-        when(pdfDocumentFactory.load(any(MultipartFile.class)))
+        lenient()
+                .when(pdfDocumentFactory.load(any(MultipartFile.class)))
                 .thenAnswer(
                         invocation -> {
                             MultipartFile file = invocation.getArgument(0);
@@ -135,10 +174,11 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 
     @Test
@@ -161,10 +201,36 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
+    }
+
+    @Test
+    void testSignPdfWithMissingPkcs12FileThrowsError() {
+        MockMultipartFile pdfFile =
+                new MockMultipartFile(
+                        "fileInput", "test.pdf", MediaType.APPLICATION_PDF_VALUE, pdfBytes);
+
+        SignPDFWithCertRequest request = new SignPDFWithCertRequest();
+        request.setFileInput(pdfFile);
+        request.setCertType("PFX");
+        request.setPassword("password");
+        request.setShowSignature(false);
+        request.setReason("test");
+        request.setLocation("test");
+        request.setName("tester");
+        request.setPageNumber(1);
+        request.setShowLogo(false);
+
+        IllegalArgumentException exception =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> certSignController.signPDFWithCert(request, httpRequest));
+
+        assertTrue(exception.getMessage().contains("PKCS12 keystore"));
     }
 
     @Test
@@ -188,10 +254,11 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 
     @Test
@@ -219,10 +286,11 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 
     @Test
@@ -250,10 +318,11 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 
     @Test
@@ -281,10 +350,11 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 
     @Test
@@ -312,9 +382,10 @@ class CertSignControllerTest {
         request.setPageNumber(1);
         request.setShowLogo(false);
 
-        ResponseEntity<byte[]> response = certSignController.signPDFWithCert(request);
+        ResponseEntity<Resource> response =
+                certSignController.signPDFWithCert(request, httpRequest);
 
         assertNotNull(response.getBody());
-        assertTrue(response.getBody().length > 0);
+        assertTrue(drainBody(response).length > 0);
     }
 }

@@ -1,6 +1,5 @@
 package stirling.software.SPDF.controller.api.security;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
 
@@ -25,41 +24,46 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import stirling.software.SPDF.config.swagger.StandardPdfResponse;
 import stirling.software.SPDF.model.api.security.SanitizePdfRequest;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.SecurityApi;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.GeneralUtils;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
-@RestController
-@RequestMapping("/api/v1/security")
-@Tag(name = "Security", description = "Security APIs")
 @Slf4j
+@SecurityApi
 @RequiredArgsConstructor
 public class SanitizeController {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final TempFileManager tempFileManager;
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/sanitize-pdf")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/sanitize-pdf",
+            resourceWeight = ResourceWeight.MEDIUM_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Sanitize a PDF file",
             description =
                     "This endpoint processes a PDF file and removes specific elements based on the"
                             + " provided options. Input:PDF Output:PDF Type:SISO")
-    public ResponseEntity<byte[]> sanitizePDF(@ModelAttribute SanitizePdfRequest request)
+    public ResponseEntity<Resource> sanitizePDF(@ModelAttribute SanitizePdfRequest request)
             throws IOException {
         MultipartFile inputFile = request.getFileInput();
         boolean removeJavaScript = Boolean.TRUE.equals(request.getRemoveJavaScript());
@@ -69,39 +73,37 @@ public class SanitizeController {
         boolean removeLinks = Boolean.TRUE.equals(request.getRemoveLinks());
         boolean removeFonts = Boolean.TRUE.equals(request.getRemoveFonts());
 
-        PDDocument document = pdfDocumentFactory.load(inputFile, true);
-        if (removeJavaScript) {
-            sanitizeJavaScript(document);
+        try (PDDocument document = pdfDocumentFactory.load(inputFile, true)) {
+            if (removeJavaScript) {
+                sanitizeJavaScript(document);
+            }
+
+            if (removeEmbeddedFiles) {
+                sanitizeEmbeddedFiles(document);
+            }
+
+            if (removeXMPMetadata) {
+                sanitizeXMPMetadata(document);
+            }
+
+            if (removeMetadata) {
+                sanitizeDocumentInfoMetadata(document);
+            }
+
+            if (removeLinks) {
+                sanitizeLinks(document);
+            }
+
+            if (removeFonts) {
+                sanitizeFonts(document);
+            }
+
+            return WebResponseUtils.pdfDocToWebResponse(
+                    document,
+                    GeneralUtils.generateFilename(
+                            inputFile.getOriginalFilename(), "_sanitized.pdf"),
+                    tempFileManager);
         }
-
-        if (removeEmbeddedFiles) {
-            sanitizeEmbeddedFiles(document);
-        }
-
-        if (removeXMPMetadata) {
-            sanitizeXMPMetadata(document);
-        }
-
-        if (removeMetadata) {
-            sanitizeDocumentInfoMetadata(document);
-        }
-
-        if (removeLinks) {
-            sanitizeLinks(document);
-        }
-
-        if (removeFonts) {
-            sanitizeFonts(document);
-        }
-
-        // Save the sanitized document to output stream
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        document.save(outputStream);
-        document.close();
-
-        return WebResponseUtils.bytesToWebResponse(
-                outputStream.toByteArray(),
-                GeneralUtils.generateFilename(inputFile.getOriginalFilename(), "_sanitized.pdf"));
     }
 
     private static void sanitizeJavaScript(PDDocument document) throws IOException {

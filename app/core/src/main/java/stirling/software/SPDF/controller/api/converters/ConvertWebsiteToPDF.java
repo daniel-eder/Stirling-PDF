@@ -20,44 +20,48 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import org.springframework.web.util.UriComponentsBuilder;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import stirling.software.SPDF.model.api.converters.UrlToPdfRequest;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.ConvertApi;
 import stirling.software.common.configuration.RuntimePathConfig;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.model.ApplicationProperties;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.util.ExceptionUtils;
 import stirling.software.common.util.GeneralUtils;
 import stirling.software.common.util.ProcessExecutor;
 import stirling.software.common.util.RegexPatternUtils;
+import stirling.software.common.util.TempFile;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
-@RestController
-@Tag(name = "Convert", description = "Convert APIs")
+@ConvertApi
 @Slf4j
-@RequestMapping("/api/v1/convert")
 @RequiredArgsConstructor
 public class ConvertWebsiteToPDF {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
     private final RuntimePathConfig runtimePathConfig;
     private final ApplicationProperties applicationProperties;
+    private final TempFileManager tempFileManager;
 
     private static final Pattern FILE_SCHEME_PATTERN =
             Pattern.compile("(?<![a-z0-9_])file\\s*:(?:/{1,3}|%2f|%5c|%3a|&#x2f;|&#47;)");
 
     private static final Pattern NUMERIC_HTML_ENTITY_PATTERN = Pattern.compile("&#(x?[0-9a-f]+);");
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/url/pdf")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/url/pdf",
+            resourceWeight = ResourceWeight.MEDIUM_WEIGHT)
     @Operation(
             summary = "Convert a URL to a PDF",
             description =
@@ -71,7 +75,7 @@ public class ConvertWebsiteToPDF {
         URI location = null;
         HttpStatus status = HttpStatus.SEE_OTHER;
 
-        if (!applicationProperties.getSystem().getEnableUrlToPDF()) {
+        if (!applicationProperties.getSystem().isEnableUrlToPDF()) {
             location =
                     uriComponentsBuilder
                             .queryParam("error", "error.endpointDisabled")
@@ -105,7 +109,6 @@ public class ConvertWebsiteToPDF {
 
         Path tempOutputFile = null;
         Path tempHtmlInput = null;
-        PDDocument doc = null;
         try {
             // Download the remote content first to ensure we don't allow dangerous schemes
             String htmlContent = fetchRemoteHtml(URL);
@@ -139,18 +142,15 @@ public class ConvertWebsiteToPDF {
                     .runCommandWithOutputHandling(command);
 
             // Load the PDF using pdfDocumentFactory
-            doc = pdfDocumentFactory.load(tempOutputFile.toFile());
-
-            // Convert URL to a safe filename
             String outputFilename = convertURLToFileName(URL);
-
-            ResponseEntity<byte[]> response =
-                    WebResponseUtils.pdfDocToWebResponse(doc, outputFilename);
-            if (response == null) {
-                // Defensive fallback - should not happen but avoids null returns breaking tests
-                return ResponseEntity.ok(new byte[0]);
+            TempFile tempOut = tempFileManager.createManagedTempFile(".pdf");
+            try (PDDocument doc = pdfDocumentFactory.load(tempOutputFile.toFile())) {
+                doc.save(tempOut.getFile());
+            } catch (Exception e) {
+                tempOut.close();
+                throw e;
             }
-            return response;
+            return WebResponseUtils.pdfFileToWebResponse(tempOut, outputFilename);
         } finally {
             if (tempHtmlInput != null) {
                 try {
@@ -173,7 +173,7 @@ public class ConvertWebsiteToPDF {
     private String fetchRemoteHtml(String url) throws IOException, InterruptedException {
         HttpClient client =
                 HttpClient.newBuilder()
-                        .followRedirects(HttpClient.Redirect.NORMAL)
+                        .followRedirects(HttpClient.Redirect.NEVER)
                         .connectTimeout(Duration.ofSeconds(10))
                         .build();
 
@@ -187,9 +187,12 @@ public class ConvertWebsiteToPDF {
         HttpResponse<String> response =
                 client.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
 
-        if (response.statusCode() >= 400 || response.body() == null) {
-            throw new IOException(
-                    "Failed to retrieve remote HTML. Status: " + response.statusCode());
+        if (response.statusCode() >= 300 || response.body() == null) {
+            throw ExceptionUtils.createIOException(
+                    "error.httpRequestFailed",
+                    "Failed to retrieve remote HTML. Status: {0}",
+                    null,
+                    response.statusCode());
         }
 
         return response.body();

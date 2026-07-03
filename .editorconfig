@@ -14,7 +14,8 @@ indent_size = 4
 max_line_length = 100
 
 [*.py]
-indent_size = 2
+indent_size = 4
+max_line_length = 120
 
 [*.gradle]
 indent_size = 4
@@ -24,7 +25,7 @@ indent_size = 2
 insert_final_newline = false
 trim_trailing_whitespace = false
 
-[*.js]
+[{*.js,*.jsx,*.mjs,*.ts,*.tsx}]
 indent_size = 2
 
 [*.css]

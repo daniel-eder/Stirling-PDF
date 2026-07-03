@@ -28,11 +28,12 @@ public class InitialSetup {
 
     private final ApplicationProperties applicationProperties;
 
+    private static boolean isNewServer = false;
+
     @PostConstruct
     public void init() throws IOException {
         initUUIDKey();
         initSecretKey();
-        initEnableCSRFSecurity();
         initLegalUrls();
         initSetAppVersion();
         GeneralUtils.extractPipeline();
@@ -58,18 +59,6 @@ public class InitialSetup {
         }
     }
 
-    public void initEnableCSRFSecurity() throws IOException {
-        if (GeneralUtils.isVersionHigher(
-                "0.46.0", applicationProperties.getAutomaticallyGenerated().getAppVersion())) {
-            Boolean csrf = applicationProperties.getSecurity().getCsrfDisabled();
-            if (!csrf) {
-                GeneralUtils.saveKeyToSettings("security.csrfDisabled", false);
-                GeneralUtils.saveKeyToSettings("system.enableAnalytics", true);
-                applicationProperties.getSecurity().setCsrfDisabled(false);
-            }
-        }
-    }
-
     public void initLegalUrls() throws IOException {
         // Initialize Terms and Conditions
         String termsUrl = applicationProperties.getLegal().getTermsAndConditions();
@@ -88,6 +77,13 @@ public class InitialSetup {
     }
 
     public void initSetAppVersion() throws IOException {
+        // Check if this is a new server before setting the version
+        String existingVersion = applicationProperties.getAutomaticallyGenerated().getAppVersion();
+        isNewServer =
+                existingVersion == null
+                        || existingVersion.isEmpty()
+                        || "0.0.0".equals(existingVersion);
+
         String appVersion = "0.0.0";
         Resource resource = new ClassPathResource("version.properties");
         Properties props = new Properties();
@@ -98,5 +94,10 @@ public class InitialSetup {
         }
         GeneralUtils.saveKeyToSettings("AutomaticallyGenerated.appVersion", appVersion);
         applicationProperties.getAutomaticallyGenerated().setAppVersion(appVersion);
+        applicationProperties.getAutomaticallyGenerated().setIsNewServer(isNewServer);
+    }
+
+    public static boolean isNewServer() {
+        return isNewServer;
     }
 }

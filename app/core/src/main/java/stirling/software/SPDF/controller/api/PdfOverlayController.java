@@ -1,6 +1,5 @@
 package stirling.software.SPDF.controller.api;
 
-import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -11,40 +10,48 @@ import java.util.Map;
 
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.multipdf.Overlay;
+import org.apache.pdfbox.pdfwriter.compress.CompressParameters;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
 
 import lombok.RequiredArgsConstructor;
 
+import stirling.software.SPDF.config.swagger.StandardPdfResponse;
 import stirling.software.SPDF.model.api.general.OverlayPdfsRequest;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.GeneralApi;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.service.CustomPDFDocumentFactory;
+import stirling.software.common.util.ExceptionUtils;
 import stirling.software.common.util.GeneralUtils;
+import stirling.software.common.util.TempFile;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
-@RestController
-@RequestMapping("/api/v1/general")
-@Tag(name = "General", description = "General APIs")
+@GeneralApi
 @RequiredArgsConstructor
 public class PdfOverlayController {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final TempFileManager tempFileManager;
 
-    @PostMapping(value = "/overlay-pdfs", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @AutoJobPostMapping(
+            value = "/overlay-pdfs",
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            resourceWeight = ResourceWeight.MEDIUM_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Overlay PDF files in various modes",
             description =
                     "Overlay PDF files onto a base PDF with different modes: Sequential,"
                             + " Interleaved, or Fixed Repeat. Input:PDF Output:PDF Type:MIMO")
-    public ResponseEntity<byte[]> overlayPdfs(@ModelAttribute OverlayPdfsRequest request)
+    public ResponseEntity<Resource> overlayPdfs(@ModelAttribute OverlayPdfsRequest request)
             throws IOException {
         MultipartFile baseFile = request.getFileInput();
         int overlayPos = request.getOverlayPosition();
@@ -53,6 +60,7 @@ public class PdfOverlayController {
         File[] overlayPdfFiles = new File[overlayFiles.length];
         List<File> tempFiles = new ArrayList<>(); // List to keep track of temporary files
 
+        TempFile tempOut = null;
         try {
             for (int i = 0; i < overlayFiles.length; i++) {
                 overlayPdfFiles[i] = GeneralUtils.multipartToFile(overlayFiles[i]);
@@ -79,16 +87,21 @@ public class PdfOverlayController {
                     overlay.setOverlayPosition(Overlay.Position.BACKGROUND);
                 }
 
-                ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-                overlay.overlay(overlayGuide).save(outputStream);
-                byte[] data = outputStream.toByteArray();
+                tempOut = tempFileManager.createManagedTempFile(".pdf");
+                overlay.overlay(overlayGuide).save(tempOut.getFile());
                 String outputFilename =
                         GeneralUtils.generateFilename(
                                 baseFile.getOriginalFilename(), "_overlayed.pdf");
 
-                return WebResponseUtils.bytesToWebResponse(
-                        data, outputFilename, MediaType.APPLICATION_PDF);
+                TempFile out = tempOut;
+                tempOut = null; // ownership transferred to response Resource
+                return WebResponseUtils.pdfFileToWebResponse(out, outputFilename);
             }
+        } catch (Exception e) {
+            if (tempOut != null) {
+                tempOut.close();
+            }
+            throw e;
         } finally {
             for (File overlayPdfFile : overlayPdfFiles) {
                 if (overlayPdfFile != null) {
@@ -118,7 +131,8 @@ public class PdfOverlayController {
                 fixedRepeatOverlay(overlayGuide, overlayFiles, counts, basePageCount);
                 break;
             default:
-                throw new IllegalArgumentException("Invalid overlay mode");
+                throw ExceptionUtils.createIllegalArgumentException(
+                        "error.invalidFormat", "Invalid {0} format: {1}", "overlay mode", mode);
         }
         return overlayGuide;
     }
@@ -140,12 +154,14 @@ public class PdfOverlayController {
                 overlayFileIndex = (overlayFileIndex + 1) % overlayFiles.length;
             }
 
-            try (PDDocument overlayPdf = Loader.loadPDF(overlayFiles[overlayFileIndex])) {
-                PDDocument singlePageDocument = new PDDocument();
+            try (PDDocument overlayPdf = Loader.loadPDF(overlayFiles[overlayFileIndex]);
+                    PDDocument singlePageDocument = new PDDocument()) {
                 singlePageDocument.addPage(overlayPdf.getPage(pageCountInCurrentOverlay));
                 File tempFile = Files.createTempFile("overlay-page-", ".pdf").toFile();
-                singlePageDocument.save(tempFile);
-                singlePageDocument.close();
+                // NO_COMPRESSION: this single-page doc holds a page copied from overlayPdf.
+                // PDFBox 3.0.7's compressed writer (PDFBOX-6203) drops shared resources imported
+                // across documents, corrupting overlay fonts. Revert once on 3.0.8.
+                singlePageDocument.save(tempFile, CompressParameters.NO_COMPRESSION);
 
                 overlayGuide.put(basePageIndex, tempFile.getAbsolutePath());
                 tempFiles.add(tempFile); // Keep track of the temporary file for cleanup
@@ -181,8 +197,11 @@ public class PdfOverlayController {
             Map<Integer, String> overlayGuide, File[] overlayFiles, int[] counts, int basePageCount)
             throws IOException {
         if (overlayFiles.length != counts.length) {
-            throw new IllegalArgumentException(
-                    "Counts array length must match the number of overlay files");
+            throw ExceptionUtils.createIllegalArgumentException(
+                    "error.invalidFormat",
+                    "Invalid {0} format: {1}",
+                    "counts array",
+                    "length must match the number of overlay files");
         }
         int currentPage = 1;
         for (int i = 0; i < overlayFiles.length; i++) {
@@ -192,7 +211,7 @@ public class PdfOverlayController {
             // Load the overlay document to check its page count
             try (PDDocument overlayPdf = Loader.loadPDF(overlayFile)) {
                 int overlayPageCount = overlayPdf.getNumberOfPages();
-                for (int j = 0; j < repeatCount; j++) {
+                for (int j = 0; j < repeatCount && currentPage <= basePageCount; j++) {
                     for (int page = 0; page < overlayPageCount; page++) {
                         if (currentPage > basePageCount) break;
                         overlayGuide.put(currentPage++, overlayFile.getAbsolutePath());
@@ -202,6 +221,3 @@ public class PdfOverlayController {
         }
     }
 }
-
-// Additional classes like OverlayPdfsRequest, WebResponseUtils, etc. are assumed to be defined
-// elsewhere.

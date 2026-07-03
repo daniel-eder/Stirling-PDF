@@ -20,14 +20,16 @@ import org.mockito.MockedStatic;
 import stirling.software.SPDF.model.SignatureFile;
 import stirling.software.common.configuration.InstallationPathConfig;
 
+import tools.jackson.databind.json.JsonMapper;
+
 class SignatureServiceTest {
 
     @TempDir Path tempDir;
-    private SignatureService signatureService;
+    private SharedSignatureService signatureService;
     private Path personalSignatureFolder;
     private Path sharedSignatureFolder;
-    private final String ALL_USERS_FOLDER = "ALL_USERS";
-    private final String TEST_USER = "testUser";
+    private static final String ALL_USERS_FOLDER = "ALL_USERS";
+    private static final String TEST_USER = "testUser";
 
     @BeforeEach
     void setUp() throws IOException {
@@ -53,7 +55,7 @@ class SignatureServiceTest {
                     .thenReturn(tempDir.toString());
 
             // Initialize the service with our temp directory
-            signatureService = new SignatureService();
+            signatureService = new SharedSignatureService(JsonMapper.builder().build());
         }
     }
 
@@ -165,7 +167,7 @@ class SignatureServiceTest {
     }
 
     @Test
-    void testGetSignatureBytes_PersonalFile() throws IOException {
+    void testGetSharedSignatureBytes_SharedFile() throws IOException {
         // Mock static method for each test
         try (MockedStatic<InstallationPathConfig> mockedConfig =
                 mockStatic(InstallationPathConfig.class)) {
@@ -173,28 +175,8 @@ class SignatureServiceTest {
                     .when(InstallationPathConfig::getSignaturesPath)
                     .thenReturn(tempDir.toString());
 
-            // Test
-            byte[] bytes = signatureService.getSignatureBytes(TEST_USER, "personal.png");
-
-            // Verify
-            assertEquals(
-                    "personal signature content",
-                    new String(bytes),
-                    "Should return the correct content for personal file");
-        }
-    }
-
-    @Test
-    void testGetSignatureBytes_SharedFile() throws IOException {
-        // Mock static method for each test
-        try (MockedStatic<InstallationPathConfig> mockedConfig =
-                mockStatic(InstallationPathConfig.class)) {
-            mockedConfig
-                    .when(InstallationPathConfig::getSignaturesPath)
-                    .thenReturn(tempDir.toString());
-
-            // Test
-            byte[] bytes = signatureService.getSignatureBytes(TEST_USER, "shared.jpg");
+            // Test - core service only reads shared signatures
+            byte[] bytes = signatureService.getSharedSignatureBytes("shared.jpg");
 
             // Verify
             assertEquals(
@@ -205,7 +187,7 @@ class SignatureServiceTest {
     }
 
     @Test
-    void testGetSignatureBytes_FileNotFound() {
+    void testGetSharedSignatureBytes_FileNotFound() {
         // Mock static method for each test
         try (MockedStatic<InstallationPathConfig> mockedConfig =
                 mockStatic(InstallationPathConfig.class)) {
@@ -216,13 +198,13 @@ class SignatureServiceTest {
             // Test and verify
             assertThrows(
                     FileNotFoundException.class,
-                    () -> signatureService.getSignatureBytes(TEST_USER, "nonexistent.png"),
+                    () -> signatureService.getSharedSignatureBytes("nonexistent.png"),
                     "Should throw exception for non-existent files");
         }
     }
 
     @Test
-    void testGetSignatureBytes_InvalidFileName() {
+    void testGetSharedSignatureBytes_InvalidFileName() {
         // Mock static method for each test
         try (MockedStatic<InstallationPathConfig> mockedConfig =
                 mockStatic(InstallationPathConfig.class)) {
@@ -233,8 +215,25 @@ class SignatureServiceTest {
             // Test and verify
             assertThrows(
                     IllegalArgumentException.class,
-                    () -> signatureService.getSignatureBytes(TEST_USER, "../invalid.png"),
+                    () -> signatureService.getSharedSignatureBytes("../invalid.png"),
                     "Should throw exception for file names with directory traversal");
+        }
+    }
+
+    @Test
+    void testGetSharedSignatureBytes_CannotAccessPersonalFiles() {
+        // Mock static method for each test
+        try (MockedStatic<InstallationPathConfig> mockedConfig =
+                mockStatic(InstallationPathConfig.class)) {
+            mockedConfig
+                    .when(InstallationPathConfig::getSignaturesPath)
+                    .thenReturn(tempDir.toString());
+
+            // Test and verify - core service should NOT be able to read personal files
+            assertThrows(
+                    FileNotFoundException.class,
+                    () -> signatureService.getSharedSignatureBytes("personal.png"),
+                    "Core service should not have access to personal signatures");
         }
     }
 

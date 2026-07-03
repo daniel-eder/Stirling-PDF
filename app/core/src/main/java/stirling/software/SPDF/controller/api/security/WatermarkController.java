@@ -24,35 +24,38 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
 import org.apache.pdfbox.util.Matrix;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.WebDataBinder;
 import org.springframework.web.bind.annotation.InitBinder;
 import org.springframework.web.bind.annotation.ModelAttribute;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.tags.Tag;
+
+import jakarta.validation.Valid;
 
 import lombok.RequiredArgsConstructor;
 
+import stirling.software.SPDF.config.swagger.StandardPdfResponse;
 import stirling.software.SPDF.model.api.security.AddWatermarkRequest;
+import stirling.software.common.annotations.AutoJobPostMapping;
+import stirling.software.common.annotations.api.SecurityApi;
+import stirling.software.common.enumeration.ResourceWeight;
 import stirling.software.common.service.CustomPDFDocumentFactory;
 import stirling.software.common.util.GeneralUtils;
 import stirling.software.common.util.PdfUtils;
 import stirling.software.common.util.RegexPatternUtils;
+import stirling.software.common.util.TempFileManager;
 import stirling.software.common.util.WebResponseUtils;
 
-@RestController
-@RequestMapping("/api/v1/security")
-@Tag(name = "Security", description = "Security APIs")
+@SecurityApi
 @RequiredArgsConstructor
 public class WatermarkController {
 
     private final CustomPDFDocumentFactory pdfDocumentFactory;
+    private final TempFileManager tempFileManager;
 
     @InitBinder
     public void initBinder(WebDataBinder binder) {
@@ -66,14 +69,18 @@ public class WatermarkController {
                 });
     }
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/add-watermark")
+    @AutoJobPostMapping(
+            consumes = MediaType.MULTIPART_FORM_DATA_VALUE,
+            value = "/add-watermark",
+            resourceWeight = ResourceWeight.MEDIUM_WEIGHT)
+    @StandardPdfResponse
     @Operation(
             summary = "Add watermark to a PDF file",
             description =
                     "This endpoint adds a watermark to a given PDF file. Users can specify the"
                             + " watermark type (text or image), rotation, opacity, width spacer, and"
                             + " height spacer. Input:PDF Output:PDF Type:SISO")
-    public ResponseEntity<byte[]> addWatermark(@ModelAttribute AddWatermarkRequest request)
+    public ResponseEntity<Resource> addWatermark(@Valid @ModelAttribute AddWatermarkRequest request)
             throws IOException, Exception {
         MultipartFile pdfFile = request.getFileInput();
         String pdfFileName = pdfFile.getOriginalFilename();
@@ -100,60 +107,69 @@ public class WatermarkController {
         String customColor = request.getCustomColor();
         boolean convertPdfToImage = Boolean.TRUE.equals(request.getConvertPDFToImage());
 
-        // Load the input PDF
-        PDDocument document = pdfDocumentFactory.load(pdfFile);
+        // Load the input PDF with proper resource management
+        try (PDDocument document = pdfDocumentFactory.load(pdfFile)) {
 
-        // Create a page in the document
-        for (PDPage page : document.getPages()) {
+            // Create a page in the document
+            for (PDPage page : document.getPages()) {
+                // Get the page's content stream
+                try (PDPageContentStream contentStream =
+                        new PDPageContentStream(
+                                document,
+                                page,
+                                PDPageContentStream.AppendMode.APPEND,
+                                true,
+                                true)) {
 
-            // Get the page's content stream
-            PDPageContentStream contentStream =
-                    new PDPageContentStream(
-                            document, page, PDPageContentStream.AppendMode.APPEND, true, true);
+                    // Set transparency
+                    PDExtendedGraphicsState graphicsState = new PDExtendedGraphicsState();
+                    graphicsState.setNonStrokingAlphaConstant(opacity);
+                    contentStream.setGraphicsStateParameters(graphicsState);
 
-            // Set transparency
-            PDExtendedGraphicsState graphicsState = new PDExtendedGraphicsState();
-            graphicsState.setNonStrokingAlphaConstant(opacity);
-            contentStream.setGraphicsStateParameters(graphicsState);
-
-            if ("text".equalsIgnoreCase(watermarkType)) {
-                addTextWatermark(
-                        contentStream,
-                        watermarkText,
-                        document,
-                        page,
-                        rotation,
-                        widthSpacer,
-                        heightSpacer,
-                        fontSize,
-                        alphabet,
-                        customColor);
-            } else if ("image".equalsIgnoreCase(watermarkType)) {
-                addImageWatermark(
-                        contentStream,
-                        watermarkImage,
-                        document,
-                        page,
-                        rotation,
-                        widthSpacer,
-                        heightSpacer,
-                        fontSize);
+                    if ("text".equalsIgnoreCase(watermarkType)) {
+                        addTextWatermark(
+                                contentStream,
+                                watermarkText,
+                                document,
+                                page,
+                                rotation,
+                                widthSpacer,
+                                heightSpacer,
+                                fontSize,
+                                alphabet,
+                                customColor);
+                    } else if ("image".equalsIgnoreCase(watermarkType)) {
+                        addImageWatermark(
+                                contentStream,
+                                watermarkImage,
+                                document,
+                                page,
+                                rotation,
+                                widthSpacer,
+                                heightSpacer,
+                                fontSize);
+                    }
+                }
             }
 
-            // Close the content stream
-            contentStream.close();
+            if (convertPdfToImage) {
+                try (PDDocument convertedPdf = PdfUtils.convertPdfToPdfImage(document)) {
+                    // Return the watermarked PDF as a response
+                    return WebResponseUtils.pdfDocToWebResponse(
+                            convertedPdf,
+                            GeneralUtils.generateFilename(
+                                    pdfFile.getOriginalFilename(), "_watermarked.pdf"),
+                            tempFileManager);
+                }
+            } else {
+                // Return the watermarked PDF as a response
+                return WebResponseUtils.pdfDocToWebResponse(
+                        document,
+                        GeneralUtils.generateFilename(
+                                pdfFile.getOriginalFilename(), "_watermarked.pdf"),
+                        tempFileManager);
+            }
         }
-
-        if (convertPdfToImage) {
-            PDDocument convertedPdf = PdfUtils.convertPdfToPdfImage(document);
-            document.close();
-            document = convertedPdf;
-        }
-
-        // Return the watermarked PDF as a response
-        return WebResponseUtils.pdfDocToWebResponse(
-                document,
-                GeneralUtils.generateFilename(pdfFile.getOriginalFilename(), "_watermarked.pdf"));
     }
 
     private void addTextWatermark(
@@ -173,15 +189,15 @@ public class WatermarkController {
         resourceDir =
                 switch (alphabet) {
                     case "arabic" -> "static/fonts/NotoSansArabic-Regular.ttf";
-                    case "japanese" -> "static/fonts/Meiryo.ttf";
-                    case "korean" -> "static/fonts/malgun.ttf";
-                    case "chinese" -> "static/fonts/SimSun.ttf";
+                    case "japanese" -> "static/fonts/NotoSansJP-Regular.ttf";
+                    case "korean" -> "static/fonts/NotoSansKR-Regular.ttf";
+                    case "chinese" -> "static/fonts/NotoSansSC-Regular.ttf";
                     case "thai" -> "static/fonts/NotoSansThai-Regular.ttf";
                     default -> "static/fonts/NotoSans-Regular.ttf";
                 };
 
         ClassPathResource classPathResource = new ClassPathResource(resourceDir);
-        String fileExtension = resourceDir.substring(resourceDir.lastIndexOf("."));
+        String fileExtension = resourceDir.substring(resourceDir.lastIndexOf('.'));
         File tempFile = Files.createTempFile("NotoSansFont", fileExtension).toFile();
         try (InputStream is = classPathResource.getInputStream();
                 FileOutputStream os = new FileOutputStream(tempFile)) {
@@ -232,8 +248,8 @@ public class WatermarkController {
 
         // Calculating the number of rows and columns.
 
-        int watermarkRows = (int) (pageHeight / newWatermarkHeight + 1);
-        int watermarkCols = (int) (pageWidth / newWatermarkWidth + 1);
+        int watermarkRows = Math.min((int) (pageHeight / newWatermarkHeight + 1), 10_000);
+        int watermarkCols = Math.min((int) (pageWidth / newWatermarkWidth + 1), 10_000);
 
         // Add the text watermark
         for (int i = 0; i <= watermarkRows; i++) {
@@ -285,9 +301,15 @@ public class WatermarkController {
         float pageWidth = page.getMediaBox().getWidth();
         float pageHeight = page.getMediaBox().getHeight();
         int watermarkRows =
-                (int) ((pageHeight + heightSpacer) / (desiredPhysicalHeight + heightSpacer));
+                Math.min(
+                        (int)
+                                ((pageHeight + heightSpacer)
+                                        / (desiredPhysicalHeight + heightSpacer)),
+                        10_000);
         int watermarkCols =
-                (int) ((pageWidth + widthSpacer) / (desiredPhysicalWidth + widthSpacer));
+                Math.min(
+                        (int) ((pageWidth + widthSpacer) / (desiredPhysicalWidth + widthSpacer)),
+                        10_000);
 
         for (int i = 0; i < watermarkRows; i++) {
             for (int j = 0; j < watermarkCols; j++) {

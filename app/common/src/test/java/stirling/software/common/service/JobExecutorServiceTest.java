@@ -1,15 +1,18 @@
 package stirling.software.common.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeoutException;
@@ -23,7 +26,12 @@ import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -79,6 +87,23 @@ class JobExecutorServiceTest {
     }
 
     @Test
+    void shouldExposeJobIdInJobContextDuringSyncExecution() throws Exception {
+        // Given
+        Supplier<Object> work = stirling.software.common.util.JobContext::getJobId;
+
+        // When
+        ResponseEntity<?> response = jobExecutorService.runJobGeneric(false, work);
+
+        // Then
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+
+        var requestJobIdCaptor = ArgumentCaptor.forClass(String.class);
+        verify(request).setAttribute(eq("jobId"), requestJobIdCaptor.capture());
+        assertEquals(requestJobIdCaptor.getValue(), response.getBody());
+    }
+
+    @Test
     void shouldRunAsyncJobSuccessfully() throws Exception {
         // Given
         Supplier<Object> work = () -> "test-result";
@@ -88,7 +113,7 @@ class JobExecutorServiceTest {
 
         // Then
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertTrue(response.getBody() instanceof JobResponse);
+        assertInstanceOf(JobResponse.class, response.getBody());
         JobResponse<?> jobResponse = (JobResponse<?>) response.getBody();
         assertTrue(jobResponse.isAsync());
         assertNotNull(jobResponse.getJobId());
@@ -117,7 +142,7 @@ class JobExecutorServiceTest {
     }
 
     @Test
-    void shouldQueueJobWhenResourcesLimited() {
+    void shouldQueueJobWhenResourcesLimited() throws Exception {
         // Given
         Supplier<Object> work = () -> "test-result";
         CompletableFuture<ResponseEntity<?>> future = new CompletableFuture<>();
@@ -133,7 +158,7 @@ class JobExecutorServiceTest {
 
         // Then
         assertEquals(HttpStatus.OK, response.getStatusCode());
-        assertTrue(response.getBody() instanceof JobResponse);
+        assertInstanceOf(JobResponse.class, response.getBody());
 
         // Verify job was queued
         verify(jobQueue).queueJob(anyString(), eq(80), any(), eq(5000L));
@@ -163,17 +188,57 @@ class JobExecutorServiceTest {
     }
 
     @Test
+    void shouldPersistResponseEntityResourceBodyViaFileStorage() throws Exception {
+        // Given: an async job whose result is a ResponseEntity<Resource> — the new
+        // branch added by the stream-to-Resource migration. The executor must route
+        // the body through FileStorage.storeFromResource and then record the result
+        // via TaskManager.setFileResult with the filename/content-type extracted
+        // from the response headers.
+        byte[] payload = "resource-bytes".getBytes(StandardCharsets.UTF_8);
+        Resource resource = new ByteArrayResource(payload);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_PDF);
+        headers.setContentDisposition(
+                ContentDisposition.formData().name("attachment").filename("result.pdf").build());
+
+        Supplier<Object> work = () -> new ResponseEntity<>(resource, headers, HttpStatus.OK);
+
+        when(fileStorage.storeFromResource(any(Resource.class), anyString()))
+                .thenReturn("stored-file-id");
+
+        // When: run the job asynchronously — processJobResult runs on the executor.
+        ResponseEntity<?> response = jobExecutorService.runJobGeneric(true, work);
+
+        // Then: the immediate return must be the JobResponse envelope.
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertInstanceOf(JobResponse.class, response.getBody());
+
+        // Wait for async processing and verify the Resource branch was taken —
+        // FileStorage.storeFromResource was invoked with the same Resource instance,
+        // and TaskManager.setFileResult recorded the extracted filename + content-type.
+        verify(fileStorage, timeout(5000)).storeFromResource(eq(resource), eq("result.pdf"));
+        verify(taskManager, timeout(5000))
+                .setFileResult(
+                        anyString(),
+                        eq("stored-file-id"),
+                        eq("result.pdf"),
+                        eq(MediaType.APPLICATION_PDF_VALUE));
+        verify(taskManager, timeout(5000)).setComplete(anyString());
+    }
+
+    @Test
     void shouldHandleTimeout() throws Exception {
         // Given
         Supplier<Object> work =
                 () -> {
-                    try {
-                        Thread.sleep(100); // Simulate long-running job
-                        return "test-result";
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException(e);
+                    // Simulate long-running job without actual sleep
+                    // Use a loop to consume time instead of Thread.sleep
+                    long startTime = System.nanoTime();
+                    while (System.nanoTime() - startTime < 100_000_000) { // 100ms in nanoseconds
+                        // Busy wait to simulate work without Thread.sleep
                     }
+                    return "test-result";
                 };
 
         // Use reflection to access the private executeWithTimeout method
@@ -186,7 +251,7 @@ class JobExecutorServiceTest {
         try {
             executeMethod.invoke(jobExecutorService, work, 1L); // Very short timeout
         } catch (Exception e) {
-            assertTrue(e.getCause() instanceof TimeoutException);
+            assertInstanceOf(TimeoutException.class, e.getCause());
         }
     }
 }

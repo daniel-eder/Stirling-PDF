@@ -3,11 +3,11 @@ package stirling.software.proprietary.security.service;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -29,6 +29,7 @@ public class KeyPairCleanupService {
     private final KeyPersistenceService keyPersistenceService;
     private final ApplicationProperties.Security.Jwt jwtProperties;
 
+    @Autowired
     public KeyPairCleanupService(
             KeyPersistenceService keyPersistenceService,
             ApplicationProperties applicationProperties) {
@@ -40,7 +41,7 @@ public class KeyPairCleanupService {
     @PostConstruct
     @Scheduled(fixedDelay = 1, timeUnit = TimeUnit.DAYS)
     public void cleanup() {
-        if (!jwtProperties.isEnabled() || !jwtProperties.isKeyCleanup()) {
+        if (!jwtProperties.isEnableKeyCleanup() || !keyPersistenceService.isKeystoreEnabled()) {
             return;
         }
 
@@ -53,7 +54,6 @@ public class KeyPairCleanupService {
             return;
         }
 
-        log.info("Removing keys older than retention period");
         removeKeys(eligibleKeys);
         keyPersistenceService.refreshActiveKeyPair();
     }
@@ -71,11 +71,11 @@ public class KeyPairCleanupService {
     }
 
     private void removePrivateKey(String keyId) throws IOException {
-        if (!jwtProperties.isEnabled()) {
+        if (!keyPersistenceService.isKeystoreEnabled()) {
             return;
         }
 
-        Path privateKeyDirectory = Paths.get(InstallationPathConfig.getPrivateKeyPath());
+        Path privateKeyDirectory = Path.of(InstallationPathConfig.getPrivateKeyPath());
         Path keyFile = privateKeyDirectory.resolve(keyId + KeyPersistenceService.KEY_SUFFIX);
 
         if (Files.exists(keyFile)) {

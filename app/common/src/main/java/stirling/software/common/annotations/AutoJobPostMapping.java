@@ -7,6 +7,8 @@ import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 
+import io.swagger.v3.oas.annotations.parameters.RequestBody;
+
 /**
  * Shortcut for a POST endpoint that is executed through the Stirling "auto‑job" framework.
  *
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.RequestMethod;
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
 @RequestMapping(method = RequestMethod.POST)
+@RequestBody(required = true)
 public @interface AutoJobPostMapping {
 
     /** Alias for {@link RequestMapping#value} – the path mapping of the endpoint. */
@@ -72,8 +75,12 @@ public @interface AutoJobPostMapping {
     boolean queueable() default false;
 
     /**
-     * Relative resource weight (1–100) used by the scheduler to prioritise / throttle jobs. Values
-     * below 1 are clamped to&nbsp;1, values above 100 to&nbsp;100.
+     * Relative resource weight (1-100). See {@link
+     * stirling.software.common.enumeration.ResourceWeight} for the standard tiers.
+     *
+     * <p>The default is a sentinel ({@link Integer#MIN_VALUE}); {@code
+     * AutoJobPostMappingWeightTest} fails the build if any endpoint leaves it unset. Runtime
+     * readers clamp the value into {@code [1, 100]}.
      */
-    int resourceWeight() default 50;
+    int resourceWeight() default Integer.MIN_VALUE;
 }

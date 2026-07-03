@@ -1,5 +1,8 @@
 package stirling.software.proprietary.security.service;
 
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -45,17 +48,19 @@ public class LoginAttemptService {
         if (!isBlockedEnabled || key == null || key.trim().isEmpty()) {
             return;
         }
-        attemptsCache.remove(key.toLowerCase());
+        String normalizedKey = key.toLowerCase(Locale.ROOT);
+        attemptsCache.remove(normalizedKey);
     }
 
     public void loginFailed(String key) {
         if (!isBlockedEnabled || key == null || key.trim().isEmpty()) {
             return;
         }
-        AttemptCounter attemptCounter = attemptsCache.get(key.toLowerCase());
+        String normalizedKey = key.toLowerCase(Locale.ROOT);
+        AttemptCounter attemptCounter = attemptsCache.get(normalizedKey);
         if (attemptCounter == null) {
             attemptCounter = new AttemptCounter();
-            attemptsCache.put(key.toLowerCase(), attemptCounter);
+            attemptsCache.put(normalizedKey, attemptCounter);
         } else {
             if (attemptCounter.shouldReset(ATTEMPT_INCREMENT_TIME)) {
                 attemptCounter.reset();
@@ -68,11 +73,34 @@ public class LoginAttemptService {
         if (!isBlockedEnabled || key == null || key.trim().isEmpty()) {
             return false;
         }
-        AttemptCounter attemptCounter = attemptsCache.get(key.toLowerCase());
+        String normalizedKey = key.toLowerCase(Locale.ROOT);
+        AttemptCounter attemptCounter = attemptsCache.get(normalizedKey);
         if (attemptCounter == null) {
             return false;
         }
         return attemptCounter.getAttemptCount() >= MAX_ATTEMPT;
+    }
+
+    public void resetAttempts(String key) {
+        if (key == null || key.trim().isEmpty()) {
+            return;
+        }
+        String normalizedKey = key.toLowerCase(Locale.ROOT);
+        attemptsCache.remove(normalizedKey);
+    }
+
+    public boolean isBlockingEnabled() {
+        return isBlockedEnabled;
+    }
+
+    public List<String> getAllBlockedUsers() {
+        if (!isBlockedEnabled) {
+            return List.of();
+        }
+        return attemptsCache.entrySet().stream()
+                .filter(entry -> entry.getValue().getAttemptCount() >= MAX_ATTEMPT)
+                .map(Map.Entry::getKey)
+                .toList();
     }
 
     public int getRemainingAttempts(String key) {
@@ -80,7 +108,8 @@ public class LoginAttemptService {
             // Arbitrarily high number if tracking is disabled
             return Integer.MAX_VALUE;
         }
-        AttemptCounter attemptCounter = attemptsCache.get(key.toLowerCase());
+        String normalizedKey = key.toLowerCase(Locale.ROOT);
+        AttemptCounter attemptCounter = attemptsCache.get(normalizedKey);
         if (attemptCounter == null) {
             return MAX_ATTEMPT;
         }

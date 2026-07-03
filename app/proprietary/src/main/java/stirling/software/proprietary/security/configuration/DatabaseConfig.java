@@ -1,15 +1,18 @@
 package stirling.software.proprietary.security.configuration;
 
+import java.util.Locale;
+
 import javax.sql.DataSource;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.jdbc.DataSourceBuilder;
 import org.springframework.boot.jdbc.DatabaseDriver;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 import lombok.Getter;
@@ -25,9 +28,27 @@ import stirling.software.common.model.exception.UnsupportedProviderException;
 @EnableJpaRepositories(
         basePackages = {
             "stirling.software.proprietary.security.database.repository",
-            "stirling.software.proprietary.security.repository"
+            "stirling.software.proprietary.security.repository",
+            "stirling.software.proprietary.repository",
+            "stirling.software.proprietary.storage.repository",
+            "stirling.software.proprietary.workflow.repository",
+            "stirling.software.proprietary.policy.store",
+            "stirling.software.proprietary.policy.source",
+            "stirling.software.proprietary.accountlink",
+            "stirling.software.proprietary.access.repository",
+            "stirling.software.proprietary.integration.repository"
         })
-@EntityScan({"stirling.software.proprietary.security.model", "stirling.software.proprietary.model"})
+@EntityScan({
+    "stirling.software.proprietary.security.model",
+    "stirling.software.proprietary.model",
+    "stirling.software.proprietary.storage.model",
+    "stirling.software.proprietary.workflow.model",
+    "stirling.software.proprietary.policy.store",
+    "stirling.software.proprietary.policy.source",
+    "stirling.software.proprietary.accountlink",
+    "stirling.software.proprietary.access.model",
+    "stirling.software.proprietary.integration.model"
+})
 public class DatabaseConfig {
 
     public final String DATASOURCE_DEFAULT_URL;
@@ -61,6 +82,7 @@ public class DatabaseConfig {
     @Bean
     @Qualifier("dataSource")
     @Primary
+    @Profile("!saas")
     public DataSource dataSource() throws UnsupportedProviderException {
         DataSourceBuilder<?> dataSourceBuilder = DataSourceBuilder.create();
 
@@ -72,10 +94,18 @@ public class DatabaseConfig {
     }
 
     private DataSource useDefaultDataSource(DataSourceBuilder<?> dataSourceBuilder) {
+        // Support AOT training: override URL via system property to avoid H2 file lock
+        // conflicts when the AOT RECORD phase starts a second Spring context
+        String overrideUrl = System.getProperty("stirling.datasource.url");
+        String url =
+                (overrideUrl != null && !overrideUrl.isBlank())
+                        ? overrideUrl
+                        : DATASOURCE_DEFAULT_URL;
+
         log.info("Using default H2 database");
 
         dataSourceBuilder
-                .url(DATASOURCE_DEFAULT_URL)
+                .url(url)
                 .driverClassName(DatabaseDriver.H2.getDriverClassName())
                 .username(DEFAULT_USERNAME);
 
@@ -132,7 +162,7 @@ public class DatabaseConfig {
     private String getDriverClassName(String driverName) throws UnsupportedProviderException {
         try {
             ApplicationProperties.Driver driver =
-                    ApplicationProperties.Driver.valueOf(driverName.toUpperCase());
+                    ApplicationProperties.Driver.valueOf(driverName.toUpperCase(Locale.ROOT));
 
             return switch (driver) {
                 case H2 -> {

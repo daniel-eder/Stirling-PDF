@@ -3,7 +3,6 @@ package stirling.software.common.configuration;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
@@ -11,7 +10,6 @@ import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
@@ -20,9 +18,7 @@ import org.springframework.context.annotation.Scope;
 import org.springframework.core.env.Environment;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
-import org.springframework.core.io.ResourceLoader;
 import org.springframework.util.ClassUtils;
-import org.thymeleaf.spring6.SpringTemplateEngine;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -41,16 +37,23 @@ public class AppConfig {
     private final ApplicationProperties applicationProperties;
 
     @Getter
-    @Value("${baseUrl:http://localhost}")
-    private String baseUrl;
-
-    @Getter
     @Value("${server.servlet.context-path:/}")
     private String contextPath;
 
     @Getter
     @Value("${server.port:8080}")
     private String serverPort;
+
+    /**
+     * Get the backend URL from system configuration. Falls back to http://localhost if not
+     * configured.
+     *
+     * @return The backend base URL for SAML/OAuth/API callbacks
+     */
+    public String getBackendUrl() {
+        String backendUrl = applicationProperties.getSystem().getBackendUrl();
+        return (backendUrl != null && !backendUrl.isBlank()) ? backendUrl : "http://localhost";
+    }
 
     @Value("${v2}")
     public boolean v2Enabled;
@@ -60,23 +63,14 @@ public class AppConfig {
         return v2Enabled;
     }
 
-    @Bean
-    @ConditionalOnProperty(name = "system.customHTMLFiles", havingValue = "true")
-    public SpringTemplateEngine templateEngine(ResourceLoader resourceLoader) {
-        SpringTemplateEngine templateEngine = new SpringTemplateEngine();
-        templateEngine.addTemplateResolver(new FileFallbackTemplateResolver(resourceLoader));
-        return templateEngine;
-    }
-
     @Bean(name = "loginEnabled")
     public boolean loginEnabled() {
-        return applicationProperties.getSecurity().getEnableLogin();
+        return applicationProperties.getSecurity().isEnableLogin();
     }
 
     @Bean(name = "appName")
     public String appName() {
-        String homeTitle = applicationProperties.getUi().getAppName();
-        return (homeTitle != null) ? homeTitle : "Stirling PDF";
+        return "Stirling PDF";
     }
 
     @Bean(name = "appVersion")
@@ -94,9 +88,7 @@ public class AppConfig {
 
     @Bean(name = "homeText")
     public String homeText() {
-        return (applicationProperties.getUi().getHomeDescription() != null)
-                ? applicationProperties.getUi().getHomeDescription()
-                : "null";
+        return "null";
     }
 
     @Bean(name = "languages")
@@ -111,18 +103,13 @@ public class AppConfig {
 
     @Bean(name = "navBarText")
     public String navBarText() {
-        String defaultNavBar =
-                applicationProperties.getUi().getAppNameNavbar() != null
-                        ? applicationProperties.getUi().getAppNameNavbar()
-                        : applicationProperties.getUi().getAppName();
-        return (defaultNavBar != null) ? defaultNavBar : "Stirling PDF";
+        String navBar = applicationProperties.getUi().getAppNameNavbar();
+        return (navBar != null) ? navBar : "Stirling PDF";
     }
 
     @Bean(name = "enableAlphaFunctionality")
     public boolean enableAlphaFunctionality() {
-        return applicationProperties.getSystem().getEnableAlphaFunctionality() != null
-                ? applicationProperties.getSystem().getEnableAlphaFunctionality()
-                : false;
+        return applicationProperties.getSystem().isEnableAlphaFunctionality();
     }
 
     @Bean(name = "rateLimit")
@@ -134,17 +121,17 @@ public class AppConfig {
 
     @Bean(name = "RunningInDocker")
     public boolean runningInDocker() {
-        return Files.exists(Paths.get("/.dockerenv"));
+        return Files.exists(Path.of("/.dockerenv"));
     }
 
     @Bean(name = "configDirMounted")
     public boolean isRunningInDockerWithConfig() {
-        Path dockerEnv = Paths.get("/.dockerenv");
+        Path dockerEnv = Path.of("/.dockerenv");
         // default to true if not docker
         if (!Files.exists(dockerEnv)) {
             return true;
         }
-        Path mountInfo = Paths.get("/proc/1/mountinfo");
+        Path mountInfo = Path.of("/proc/1/mountinfo");
         // this should always exist, if not some unknown usecase
         if (!Files.exists(mountInfo)) {
             return true;
@@ -256,12 +243,6 @@ public class AppConfig {
     @Bean(name = "runningEE")
     @Profile("default")
     public boolean runningEnterprise() {
-        return false;
-    }
-
-    @Bean(name = "GoogleDriveEnabled")
-    @Profile("default")
-    public boolean googleDriveEnabled() {
         return false;
     }
 
