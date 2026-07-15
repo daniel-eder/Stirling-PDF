@@ -262,32 +262,4 @@ public class AttachmentController {
         }
     }
 
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE, value = "/extract-attachments")
-    @Operation(
-            summary = "Extract attachments from PDF",
-            description =
-                    "This endpoint extracts all embedded attachments from a PDF into a ZIP archive."
-                            + " Input:PDF Output:ZIP Type:SISO")
-    public ResponseEntity<byte[]> extractAttachments(
-            @ModelAttribute ExtractAttachmentsRequest request) throws IOException {
-        try (PDDocument document = pdfDocumentFactory.load(request, true)) {
-            Optional<byte[]> extracted = pdfAttachmentService.extractAttachments(document);
-
-            if (extracted.isEmpty()) {
-                throw ExceptionUtils.createIllegalArgumentException(
-                        "error.noAttachmentsFound",
-                        "No embedded attachments found in the provided PDF");
-            }
-
-            MultipartFile fileInput = request.getFileInput();
-            String sourceName =
-                    fileInput != null ? fileInput.getOriginalFilename() : request.getFileId();
-            String outputName =
-                    Filenames.toSimpleFileName(
-                            GeneralUtils.generateFilename(sourceName, "_attachments.zip"));
-
-            return WebResponseUtils.bytesToWebResponse(
-                    extracted.get(), outputName, MediaType.APPLICATION_OCTET_STREAM);
-        }
-    }
 }
