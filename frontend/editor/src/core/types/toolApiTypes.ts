@@ -756,6 +756,7 @@ export interface PDFWithPageNums {
    */
   pageNumbers?: string;
 }
+export type PdfToOutlineRequest = Record<string, never>;
 export interface PdfToPdfARequest {
   /**
    * The output format type (PDF/A or PDF/X)
@@ -1335,6 +1336,7 @@ export type ToolEndpoint =
   | "/api/v1/convert/pdf/html"
   | "/api/v1/convert/pdf/img"
   | "/api/v1/convert/pdf/markdown"
+  | "/api/v1/convert/pdf/outline"
   | "/api/v1/convert/pdf/pdfa"
   | "/api/v1/convert/pdf/presentation"
   | "/api/v1/convert/pdf/text"
@@ -1425,6 +1427,7 @@ export interface ToolApiParams {
   "/api/v1/convert/pdf/html": ConvertPdfHtmlRequest;
   "/api/v1/convert/pdf/img": ConvertToImageRequest;
   "/api/v1/convert/pdf/markdown": ConvertPdfMarkdownRequest;
+  "/api/v1/convert/pdf/outline": PdfToOutlineRequest;
   "/api/v1/convert/pdf/pdfa": PdfToPdfARequest;
   "/api/v1/convert/pdf/presentation": PdfToPresentationRequest;
   "/api/v1/convert/pdf/text": PdfToTextOrRTFRequest;
@@ -1516,6 +1519,7 @@ export const TOOL_ENDPOINTS = [
   "/api/v1/convert/pdf/html",
   "/api/v1/convert/pdf/img",
   "/api/v1/convert/pdf/markdown",
+  "/api/v1/convert/pdf/outline",
   "/api/v1/convert/pdf/pdfa",
   "/api/v1/convert/pdf/presentation",
   "/api/v1/convert/pdf/text",
