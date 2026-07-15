@@ -234,6 +234,13 @@ public class ProcessExecutor {
             log.info("Running command: {}", String.join(" ", commandToRun));
             ProcessBuilder processBuilder = new ProcessBuilder(commandToRun);
 
+            if (processType == Processes.PDF_OUTLINER) {
+                Map<String, String> environment = processBuilder.environment();
+                environment.remove("PYTHONHOME");
+                environment.remove("PYTHONPATH");
+                environment.remove("VIRTUAL_ENV");
+            }
+
             // Use the working directory if it's set
             if (workingDirectory != null) {
                 processBuilder.directory(workingDirectory);

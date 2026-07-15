@@ -102,6 +102,8 @@ public class ConvertPDFToOutline {
         // pdf-outliner input.pdf -o output.pdf
         List<String> command = new ArrayList<>();
         command.add("uvx");
+        command.add("--python");
+        command.add("3.13");
         command.add("--from");
         command.add("git+https://github.com/daniel-eder/pdf-outliner.git");
         command.add("pdf-outliner");
