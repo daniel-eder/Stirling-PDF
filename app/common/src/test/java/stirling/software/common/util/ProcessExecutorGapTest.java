@@ -467,7 +467,7 @@ class ProcessExecutorGapTest {
         @DisplayName("contains all expected process types")
         void containsExpectedValues() {
             ProcessExecutor.Processes[] values = ProcessExecutor.Processes.values();
-            assertEquals(13, values.length);
+            assertEquals(14, values.length);
             assertEquals(
                     ProcessExecutor.Processes.LIBRE_OFFICE,
                     ProcessExecutor.Processes.valueOf("LIBRE_OFFICE"));
@@ -476,6 +476,9 @@ class ProcessExecutorGapTest {
                     ProcessExecutor.Processes.valueOf("CFF_CONVERTER"));
             assertEquals(
                     ProcessExecutor.Processes.FFMPEG, ProcessExecutor.Processes.valueOf("FFMPEG"));
+            assertEquals(
+                    ProcessExecutor.Processes.PDF_OUTLINER,
+                    ProcessExecutor.Processes.valueOf("PDF_OUTLINER"));
         }
 
         @Test

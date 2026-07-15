@@ -4425,6 +4425,21 @@ desc = "Edit existing text and images inside PDFs"
 tags = "edit text,modify text,change text,edit content,update text,rewrite,correct,amend,redline,revise,text editor,content editor"
 title = "PDF Text Editor"
 
+[home.pdfToOutline]
+desc = "Use AI to detect headings and add bookmarks to a PDF document"
+tags = "AI,outline,bookmarks,table of contents,TOC,headings,navigation,generate bookmarks"
+title = "Generate Table of Contents"
+
+[pdfToOutline]
+loading = "Analyzing document..."
+submit = "Generate Table of Contents"
+
+[pdfToOutline.error]
+failed = "An error occurred while generating the table of contents."
+
+[pdfToOutline.results]
+title = "Generated Table of Contents"
+
 [home.pdfToSinglePage]
 desc = "Merges all PDF pages into one large single page"
 tags = "combine,merge,single,single page,one page,merge to single,combine all,stitch pages,concatenate vertical,long page,poster"

@@ -40,6 +40,7 @@ import { timestampPdfOperationConfig } from "@app/hooks/tools/timestampPdf/useTi
 import { bookletImpositionOperationConfig } from "@app/hooks/tools/bookletImposition/useBookletImpositionOperation";
 import { mergeOperationConfig } from "@app/hooks/tools/merge/useMergeOperation";
 import { editTableOfContentsOperationConfig } from "@app/hooks/tools/editTableOfContents/useEditTableOfContentsOperation";
+import { pdfToOutlineOperationConfig } from "@app/hooks/tools/pdfToOutline/usePdfToOutlineOperation";
 import { autoRenameOperationConfig } from "@app/hooks/tools/autoRename/useAutoRenameOperation";
 import { usePrototypeToolRegistry } from "@app/data/usePrototypeToolRegistry";
 import { flattenOperationConfig } from "@app/hooks/tools/flatten/useFlattenOperation";
@@ -593,6 +594,22 @@ export function useTranslatedToolCatalog(): TranslatedToolCatalog {
         automationSettings: null,
         supportsAutomate: false,
         synonyms: getSynonyms(t, "editTableOfContents"),
+      },
+      pdfToOutline: {
+        icon: <LocalIcon icon="toc-rounded" width="1.5rem" height="1.5rem" />,
+        name: t("home.pdfToOutline.title", "Generate Table of Contents"),
+        component: lazy(() => import("@app/tools/PdfToOutline")),
+        description: t(
+          "home.pdfToOutline.desc",
+          "Use AI to detect headings and add bookmarks to a PDF document",
+        ),
+        categoryId: ToolCategoryId.STANDARD_TOOLS,
+        subcategoryId: SubcategoryId.DOCUMENT_REVIEW,
+        maxFiles: 1,
+        endpoints: ["pdf-to-outline"],
+        operationConfig: asRegistryConfig(pdfToOutlineOperationConfig),
+        automationSettings: null,
+        synonyms: getSynonyms(t, "pdfToOutline"),
       },
       // Page Formatting
 

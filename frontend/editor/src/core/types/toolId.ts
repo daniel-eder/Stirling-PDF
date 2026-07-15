@@ -34,6 +34,7 @@ export const CORE_REGULAR_TOOL_IDS = [
   "annotate",
   "scannerImageSplit",
   "editTableOfContents",
+  "pdfToOutline",
   "scannerEffect",
   "autoRename",
   "pageLayout",

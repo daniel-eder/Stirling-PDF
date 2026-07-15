@@ -92,6 +92,7 @@ export const URL_TO_TOOL_MAP: Record<string, ToolId> = {
   // Advanced tools
   "/overlay-pdfs": "overlayPdfs",
   "/edit-table-of-contents": "editTableOfContents",
+  "/pdf-to-outline": "pdfToOutline",
   "/auto-rename": "autoRename",
   "/compare": "compare",
   "/multi-tool": "multiTool",

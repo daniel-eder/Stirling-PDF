@@ -368,6 +368,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Convert", "pdf-to-markdown");
         addEndpointToGroup("Convert", "eml-to-pdf");
         addEndpointToGroup("Convert", "pdf-to-epub");
+        addEndpointToGroup("Convert", "pdf-to-outline");
         // Backend-only endpoints (not in frontend tool registry)
         addEndpointToGroup("Convert", "pdf-to-vector");
         addEndpointToGroup("Convert", "vector-to-pdf");
@@ -462,6 +463,7 @@ public class EndpointConfiguration {
         addEndpointToGroup("Python", "html-to-pdf");
         addEndpointToGroup("Python", "url-to-pdf");
         addEndpointToGroup("Python", "file-to-pdf");
+        addEndpointToGroup("Python", "pdf-to-outline");
 
         // openCV
         addEndpointToGroup("OpenCV", "extract-image-scans");

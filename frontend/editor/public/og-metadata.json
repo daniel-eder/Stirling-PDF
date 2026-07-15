@@ -115,6 +115,11 @@
       "title": "Edit Table of Contents - Stirling PDF",
       "description": "Add or edit bookmarks and table of contents in PDF documents"
     },
+    "pdfToOutline": {
+      "image": "/og_images/home.png",
+      "title": "Generate Table of Contents - Stirling PDF",
+      "description": "Use AI to detect headings and add bookmarks to a PDF document"
+    },
     "scannerEffect": {
       "image": "/og_images/scanner-effect.png",
       "title": "Scanner Effect - Stirling PDF",
@@ -514,6 +519,7 @@
     "/annotate": "annotate",
     "/scanner-image-split": "scannerImageSplit",
     "/edit-table-of-contents": "editTableOfContents",
+    "/pdf-to-outline": "pdfToOutline",
     "/scanner-effect": "scannerEffect",
     "/auto-rename": "autoRename",
     "/page-layout": "pageLayout",
