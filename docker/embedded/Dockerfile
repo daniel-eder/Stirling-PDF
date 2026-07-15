@@ -64,6 +64,8 @@ WORKDIR /tmp
 COPY --from=app-build /app/app/core/build/libs/*.jar app.jar
 RUN java -Djarmode=tools -jar app.jar extract --layers --destination /layers
 
+# Runtime tools used to launch pdf-outliner.
+FROM ghcr.io/astral-sh/uv:0.11.28@sha256:0f36cb9361a3346885ca3677e3767016687b5a170c1a6b88465ec14aefec90aa AS uv
 
 # Stage 3: Final runtime image on top of pre-built base
 FROM ${BASE_IMAGE}
@@ -71,6 +73,14 @@ FROM ${BASE_IMAGE}
 ARG VERSION_TAG
 
 WORKDIR /app
+
+COPY --from=uv /uv /uvx /usr/local/bin/
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && uvx --version \
+    && git --version
 
 # Application layers
 COPY --link --from=jar-extract --chown=1000:1000 /layers/dependencies/           /app/
