@@ -1034,17 +1034,6 @@ public class ApplicationProperties {
             private String userListScope = "org";
         }
 
-        public boolean isPosthogEnabled() {
-            // Treat null as enabled when analytics is enabled
-            return this.isAnalyticsEnabled()
-                    && (this.getEnablePosthog() == null || this.getEnablePosthog());
-        }
-
-        public boolean isScarfEnabled() {
-            // Treat null as enabled when analytics is enabled
-            return this.isAnalyticsEnabled()
-                    && (this.getEnableScarf() == null || this.getEnableScarf());
-        }
     }
 
     @Data

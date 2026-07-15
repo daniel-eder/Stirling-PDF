@@ -1013,11 +1013,6 @@ public class ExceptionUtils {
         return createOutOfMemoryDpiException(dpi, (Throwable) cause);
     }
 
-    public static IOException createGhostscriptConversionException(String outputType) {
-        return createIOException(
-                "error.commandFailed", "{0} command failed", null, "Ghostscript " + outputType);
-    }
-
     /**
      * Check if an exception indicates a corrupted PDF and wrap it with appropriate message.
      *
