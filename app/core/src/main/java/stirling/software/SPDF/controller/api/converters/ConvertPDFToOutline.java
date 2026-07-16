@@ -109,7 +109,7 @@ public class ConvertPDFToOutline {
         command.add(inputFile.toString());
         if (guidance != null && !guidance.isBlank()) {
             command.add("-g");
-            command.add(guidance);
+            command.add(guidance.replace('\n', ' ').replace('\r', ' '));
         }
         command.add("-o");
         command.add(outputFile.toString());
