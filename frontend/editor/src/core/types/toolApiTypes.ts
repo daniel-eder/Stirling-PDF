@@ -756,7 +756,12 @@ export interface PDFWithPageNums {
    */
   pageNumbers?: string;
 }
-export type PdfToOutlineRequest = Record<string, never>;
+export interface PdfToOutlineRequest {
+  /**
+   * Additional guidance for the AI about what kind of outline to produce
+   */
+  guidance?: string;
+}
 export interface PdfToPdfARequest {
   /**
    * The output format type (PDF/A or PDF/X)

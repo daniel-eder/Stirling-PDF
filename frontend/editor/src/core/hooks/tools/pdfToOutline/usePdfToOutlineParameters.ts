@@ -4,9 +4,13 @@ import {
   useBaseParameters,
 } from "@app/hooks/tools/shared/useBaseParameters";
 
-export interface PdfToOutlineParameters extends BaseParameters {}
+export interface PdfToOutlineParameters extends BaseParameters {
+  guidance: string;
+}
 
-export const defaultParameters: PdfToOutlineParameters = {};
+export const defaultParameters: PdfToOutlineParameters = {
+  guidance: "",
+};
 
 export type PdfToOutlineParametersHook =
   BaseParametersHook<PdfToOutlineParameters>;

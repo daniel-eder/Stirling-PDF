@@ -9,5 +9,5 @@ import stirling.software.common.model.api.PDFFile;
 @EqualsAndHashCode(callSuper = true)
 public class PdfToOutlineRequest extends PDFFile {
 
-    // No additional fields needed for now
+    private String guidance;
 }

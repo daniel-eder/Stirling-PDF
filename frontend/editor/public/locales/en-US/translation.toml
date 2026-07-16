@@ -4486,6 +4486,12 @@ title = "Generate Table of Contents"
 loading = "Analyzing document..."
 submit = "Generate Table of Contents"
 
+[pdfToOutline.guidance]
+stepTitle = "Additional Prompt Guidance"
+label = "AI Guidance (optional)"
+placeholder = "e.g. Focus on chapter headings and ignore page numbers"
+description = "Provide additional context for the AI outline generation (max 1000 characters)"
+
 [pdfToOutline.error]
 failed = "An error occurred while generating the table of contents."
 

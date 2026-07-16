@@ -70,7 +70,8 @@ public class ConvertPDFToOutline {
             tempOutputFile = Files.createTempFile("output_", ".pdf");
 
             // Run pdf_outliner
-            ProcessExecutorResult result = runPdfOutliner(tempInputFile, tempOutputFile);
+            ProcessExecutorResult result =
+                    runPdfOutliner(tempInputFile, tempOutputFile, request.getGuidance());
 
             if (result.getRc() != 0) {
                 log.error("PDF outlining failed with return code: {}", result.getRc());
@@ -96,10 +97,9 @@ public class ConvertPDFToOutline {
         }
     }
 
-    private ProcessExecutorResult runPdfOutliner(Path inputFile, Path outputFile)
+    private ProcessExecutorResult runPdfOutliner(
+            Path inputFile, Path outputFile, String guidance)
             throws IOException, InterruptedException {
-        // Prepare command: uvx --from git+https://github.com/daniel-eder/pdf-outliner.git
-        // pdf-outliner input.pdf -o output.pdf
         List<String> command = new ArrayList<>();
         command.add("uvx");
         command.add("--python");
@@ -108,6 +108,10 @@ public class ConvertPDFToOutline {
         command.add("git+https://github.com/daniel-eder/pdf-outliner.git");
         command.add("pdf-outliner");
         command.add(inputFile.toString());
+        if (guidance != null && !guidance.isBlank()) {
+            command.add("-g");
+            command.add(guidance);
+        }
         command.add("-o");
         command.add(outputFile.toString());
 

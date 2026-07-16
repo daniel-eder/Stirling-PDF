@@ -20,6 +20,10 @@
               <p th:text="#{pdfToOutline.tip}"></p>
               <form method="post" enctype="multipart/form-data" th:action="@{'/api/v1/convert/pdf/outline'}">
                 <div th:replace="~{fragments/common :: fileSelector(name='fileInput', multipleInputsForSingleRequest=false, accept='application/pdf')}"></div>
+                <div class="form-group">
+                  <label for="guidance" th:text="#{pdfToOutline.guidance.label}">AI Guidance (optional)</label>
+                  <textarea id="guidance" name="guidance" class="form-control" rows="3" maxlength="1000" placeholder="e.g. Focus on chapter headings and ignore page numbers"></textarea>
+                </div>
                 <button type="submit" id="submitBtn" class="btn btn-primary" th:text="#{pdfToOutline.submit}"></button>
               </form>
             </div>

@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { createToolFlow } from "@app/components/tools/shared/createToolFlow";
+import PdfToOutlineSettings from "@app/components/tools/pdfToOutline/PdfToOutlineSettings";
 import { usePdfToOutlineParameters } from "@app/hooks/tools/pdfToOutline/usePdfToOutlineParameters";
 import { usePdfToOutlineOperation } from "@app/hooks/tools/pdfToOutline/usePdfToOutlineOperation";
 import { useBaseTool } from "@app/hooks/tools/shared/useBaseTool";
@@ -19,7 +20,25 @@ const PdfToOutline = (props: BaseToolProps) => {
       selectedFiles: base.selectedFiles,
       isCollapsed: base.hasResults,
     },
-    steps: [],
+    steps: [
+      {
+        title: t(
+          "pdfToOutline.guidance.stepTitle",
+          "Additional Prompt Guidance",
+        ),
+        isCollapsed: base.settingsCollapsed,
+        onCollapsedClick: base.hasResults
+          ? base.handleSettingsReset
+          : undefined,
+        content: (
+          <PdfToOutlineSettings
+            parameters={base.params.parameters}
+            onParameterChange={base.params.updateParameter}
+            disabled={base.endpointLoading}
+          />
+        ),
+      },
+    ],
     executeButton: {
       text: t("pdfToOutline.submit", "Generate Table of Contents"),
       isVisible: !base.hasResults,

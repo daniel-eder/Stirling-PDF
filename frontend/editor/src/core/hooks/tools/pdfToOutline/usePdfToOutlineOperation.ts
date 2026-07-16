@@ -4,9 +4,9 @@ import {
   useToolOperation,
 } from "@app/hooks/tools/shared/useToolOperation";
 import {
-  fileOnlyMapping,
   objectToFormData,
   type ToolEndpoint,
+  type ToolApiParams,
 } from "@app/hooks/tools/shared/toolApiMapping";
 import { createStandardErrorHandler } from "@app/utils/toolErrorHandler";
 import {
@@ -15,12 +15,20 @@ import {
 } from "@app/hooks/tools/pdfToOutline/usePdfToOutlineParameters";
 
 const ENDPOINT = "/api/v1/convert/pdf/outline" satisfies ToolEndpoint;
-const { toApiParams, fromApiParams } = fileOnlyMapping();
+type ApiParams = ToolApiParams[typeof ENDPOINT];
+
+const toApiParams = (params: PdfToOutlineParameters): ApiParams => ({
+  guidance: params.guidance || undefined,
+});
+
+const fromApiParams = (params: ApiParams): Partial<PdfToOutlineParameters> => ({
+  guidance: params.guidance ?? "",
+});
 
 export const buildPdfToOutlineFormData = (
-  _parameters: PdfToOutlineParameters,
+  parameters: PdfToOutlineParameters,
   file: File,
-): FormData => objectToFormData(toApiParams(), { fileInput: file });
+): FormData => objectToFormData(toApiParams(parameters), { fileInput: file });
 
 export const pdfToOutlineOperationConfig = defineSingleFileTool({
   buildFormData: buildPdfToOutlineFormData,
