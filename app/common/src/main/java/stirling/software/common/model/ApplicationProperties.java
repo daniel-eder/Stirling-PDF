@@ -1041,7 +1041,6 @@ public class ApplicationProperties {
             // caller's team only (fail-closed). The saas profile pins 'team'.
             private String userListScope = "org";
         }
-
     }
 
     @Data

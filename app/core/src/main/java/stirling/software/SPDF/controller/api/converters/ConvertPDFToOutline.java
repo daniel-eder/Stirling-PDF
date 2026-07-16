@@ -97,8 +97,7 @@ public class ConvertPDFToOutline {
         }
     }
 
-    private ProcessExecutorResult runPdfOutliner(
-            Path inputFile, Path outputFile, String guidance)
+    private ProcessExecutorResult runPdfOutliner(Path inputFile, Path outputFile, String guidance)
             throws IOException, InterruptedException {
         List<String> command = new ArrayList<>();
         command.add("uvx");
